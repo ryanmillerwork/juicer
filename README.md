@@ -52,3 +52,24 @@ cd ~/code/juicer/juice_pump3
 ~/code/bin/arduino-cli upload --fqbn esp32:esp32:adafruit_feather_esp32s3_reversetft -p /dev/ttyACM0 --input-dir ./build/ .
 
 sudo systemctl restart dserv
+
+# calibrating
+
+put exactly 500 ml in container
+
+screen /dev/ttyACM0 115200
+
+{"do": {"calibration": {"n": 600, "on": 500, "off": 500}}}
+
+(wait 10 minutes, measure amount of fluid dispensed [f])
+
+if f=200, ml/s = 200/(600*0.5) = 0.67 ml/s
+
+{"set": {"flow_rate": 0.67}}
+
+
+
+
+
+
+
