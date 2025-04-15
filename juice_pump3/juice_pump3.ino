@@ -1,12 +1,14 @@
-#include <Adafruit_GFX.h>
-#include <Adafruit_ST7789.h>
-#include <SPI.h>
-#include <Adafruit_NeoPixel.h>
-#include <Fonts/FreeMono9pt7b.h>
-#include <Preferences.h>
-#include <ArduinoJson.h>
 #include <Arduino.h>
 #include <driver/ledc.h>
+#include <SPI.h>   
+#include <Preferences.h>         
+#include <Adafruit_GFX.h>         // 1.12.0 by Adafruit
+#include <Fonts/FreeMono9pt7b.h>  // from Adafruit_GFX
+#include <Adafruit_ST7789.h>      // 1.10.4 by Adafruit
+#include <Adafruit_NeoPixel.h>    // 1.12.5 by Adafruit
+#include <ArduinoJson.h>          // 7.2.0 by Benoit Blanchon
+
+
 
 
 // speedup recs:
@@ -107,6 +109,8 @@ Preferences preferences;
  *      - Retrieves the current voltage supplied to the pump
  *    - {"get": ["voltage_mult"]}
  *      - Retrieves the multiplier to account for the voltage divider ratio
+ *    - {"get": ["charging"]}
+ *      - Retrieves the status of whether the battery is charging or not
  *    - {"get": ["<unknown_parameter>"]}
  *      - Returns "Unknown parameter" for any unrecognized parameter.
  *
@@ -151,10 +155,14 @@ Preferences preferences;
 const int voltageReadingPin = A1;   // Analog input pin from the voltage divider.
 const int NUM_READINGS = 25;        // Number of readings to take the median of
 float voltageSamples[NUM_READINGS]; // Array for storing the readings
+const int NUM_MEANS = 60;        // Number of readings to track for calculating charging/discharging
+float voltageMeans[NUM_MEANS];   // Array for storing the mean readings
 int voltageSampleIndex = 0;         // Keeps track of which reading we're on
 const float ADC_TO_VOLT = 0.0008059;// 3.3 / 4095.0;  Conversion factor: ADC reading to voltage.
 float voltage_mult = 11.4;     // Multiplier to recover the full-scale voltage.  11.908
 unsigned long lastVoltageReadingTime = 0; // Keeps track of last reading so we dont do it too often
+unsigned long lastVoltageMeanTime = 0;    // keeps track of last time we grabbed the mean for tracking charging
+bool charging = false;            // Global boolean initialized to false
 
 
 void writeTextToScreen(int x, int y, uint16_t color, String text) {
@@ -379,8 +387,8 @@ void check_serial_commands() {
         if (new_voltage_mult > 0) {
           voltage_mult = new_voltage_mult;
           preferences.putFloat("voltage_mult", voltage_mult);
-          preferences.end();  // Force commit changes
-          preferences.begin("watering", false);  // Reopen the namespace
+          // preferences.end();  // Force commit changes
+          // preferences.begin("watering", false);  // Reopen the namespace
         } else {
           success = false;
           responseDoc["error"] = "Invalid voltage_mult value";
@@ -509,6 +517,7 @@ void check_serial_commands() {
         else if (param == "reward_mls") responseDoc["reward_mls"] = reward_mls;
         else if (param == "reward_number") responseDoc["reward_number"] = reward_number;
         else if (param == "voltage_mult") responseDoc["voltage_mult"] = voltage_mult;
+        else if (param == "charging") responseDoc["charging"] = charging;
         else if (param == "pump_voltage") responseDoc["pump_voltage"] = compute_voltage_median();
         else responseDoc[param] = "Unknown parameter";
       }
@@ -526,6 +535,43 @@ void check_serial_commands() {
     }
   }
 }
+
+void calc_charging() {
+  // static variable to track how many samples are in voltageMeans
+  static int numReadings = 0;
+
+  // Check if at least 1 second has passed since last reading
+  if ((millis() - lastVoltageMeanTime) > 1000) {
+    // Compute the new voltage sample (or median, in this case)
+    float thisMedian = compute_voltage_median();
+
+    // Update the last reading time (assumes this timing is acceptable)
+    lastVoltageMeanTime += 1000;
+
+    // Add the new sample to our array
+    if (numReadings < NUM_MEANS) {
+      voltageMeans[numReadings] = thisMedian;
+      numReadings++;
+    } else {
+      // If the array is full, shift all elements one position to the left
+      for (int i = 0; i < NUM_MEANS - 1; i++) {
+        voltageMeans[i] = voltageMeans[i + 1];
+      }
+      // Place the new sample in the last position
+      voltageMeans[NUM_MEANS - 1] = thisMedian;
+    }
+
+    // Compare the oldest and the newest samples to set charging state.
+    // If the newest sample is less than (oldest sample - 0.01), then it's not charging.
+    if (numReadings > 1) {
+      if (voltageMeans[numReadings - 1] < (voltageMeans[0] - 0.01))
+        charging = false;
+      else
+        charging = true;
+    }
+  }
+}
+
 
 void take_voltage_reading() {
   if ((millis() - lastVoltageReadingTime) > 20) {
@@ -633,6 +679,9 @@ void setup() {
   pixels.begin();
   pixels.setBrightness(75);
   pixels.show();
+
+  // initialize this timer to current time
+  lastVoltageMeanTime = millis();
 }
 
 void loop() {
@@ -640,4 +689,5 @@ void loop() {
   check_serial_commands();
   check_for_pump_stop();
   take_voltage_reading();
+  calc_charging();
 }
