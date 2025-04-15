@@ -11,6 +11,16 @@
   },
   {
     "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
+    "Include": "SPI.h",
+    "Includepath": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/SPI/src"
+  },
+  {
+    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
+    "Include": "Preferences.h",
+    "Includepath": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/Preferences/src"
+  },
+  {
+    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
     "Include": "Adafruit_GFX.h",
     "Includepath": "/home/lab/Arduino/libraries/Adafruit_GFX_Library"
   },
@@ -26,11 +36,6 @@
   },
   {
     "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
-    "Include": "SPI.h",
-    "Includepath": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/SPI/src"
-  },
-  {
-    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
     "Include": "Adafruit_ST7789.h",
     "Includepath": "/home/lab/Arduino/libraries/Adafruit_ST7735_and_ST7789_Library"
   },
@@ -41,16 +46,21 @@
   },
   {
     "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
-    "Include": "Preferences.h",
-    "Includepath": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/Preferences/src"
-  },
-  {
-    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
     "Include": "ArduinoJson.h",
     "Includepath": "/home/lab/Arduino/libraries/ArduinoJson/src"
   },
   {
     "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/SPI/src/SPI.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/Preferences/src/Preferences.cpp",
     "Include": "",
     "Includepath": null
   },
@@ -100,11 +110,6 @@
     "Includepath": null
   },
   {
-    "Sourcefile": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/SPI/src/SPI.cpp",
-    "Include": "",
-    "Includepath": null
-  },
-  {
     "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_ST7735_and_ST7789_Library/Adafruit_ST7735.cpp",
     "Include": "",
     "Includepath": null
@@ -141,11 +146,6 @@
   },
   {
     "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_NeoPixel/kendyte_k210.c",
-    "Include": "",
-    "Includepath": null
-  },
-  {
-    "Sourcefile": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/Preferences/src/Preferences.cpp",
     "Include": "",
     "Includepath": null
   }

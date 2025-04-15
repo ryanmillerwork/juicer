@@ -1,6 +1,5 @@
 /home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp.o: \
  /home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp \
- /home/lab/Arduino/libraries/Adafruit_GFX_Library/Adafruit_GFX.h \
  /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/cores/esp32/Arduino.h \
  /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/cores/esp32/esp_arduino_version.h \
  /home/lab/.arduino15/packages/esp32/tools/esp32-arduino-libs/idf-release_v5.3-cfea4f7c-v1/esp32s3/include/freertos/FreeRTOS-Kernel/include/freertos/FreeRTOS.h \
@@ -154,6 +153,11 @@
  /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/cores/esp32/freertos_stats.h \
  /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/cores/esp32/io_pin_remap.h \
  /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/cores/esp32/Arduino.h \
+ /home/lab/.arduino15/packages/esp32/tools/esp32-arduino-libs/idf-release_v5.3-cfea4f7c-v1/esp32s3/include/esp_driver_ledc/include/driver/ledc.h \
+ /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/SPI/src/SPI.h \
+ /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/cores/esp32/esp32-hal-spi.h \
+ /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/Preferences/src/Preferences.h \
+ /home/lab/Arduino/libraries/Adafruit_GFX_Library/Adafruit_GFX.h \
  /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/cores/esp32/Print.h \
  /home/lab/Arduino/libraries/Adafruit_GFX_Library/gfxfont.h \
  /home/lab/Arduino/libraries/Adafruit_BusIO/Adafruit_I2CDevice.h \
@@ -162,17 +166,13 @@
  /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/cores/esp32/esp32-hal-log.h \
  /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/cores/esp32/HardwareI2C.h \
  /home/lab/Arduino/libraries/Adafruit_BusIO/Adafruit_SPIDevice.h \
- /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/SPI/src/SPI.h \
- /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/cores/esp32/esp32-hal-spi.h \
+ /home/lab/Arduino/libraries/Adafruit_GFX_Library/Fonts/FreeMono9pt7b.h \
  /home/lab/Arduino/libraries/Adafruit_ST7735_and_ST7789_Library/Adafruit_ST7789.h \
  /home/lab/Arduino/libraries/Adafruit_ST7735_and_ST7789_Library/Adafruit_ST77xx.h \
  /home/lab/Arduino/libraries/Adafruit_GFX_Library/Adafruit_SPITFT.h \
  /home/lab/Arduino/libraries/Adafruit_GFX_Library/Adafruit_GFX.h \
  /home/lab/Arduino/libraries/Adafruit_GFX_Library/Adafruit_SPITFT_Macros.h \
  /home/lab/Arduino/libraries/Adafruit_NeoPixel/Adafruit_NeoPixel.h \
- /home/lab/Arduino/libraries/Adafruit_GFX_Library/Fonts/FreeMono9pt7b.h \
- /home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/Preferences/src/Preferences.h \
  /home/lab/Arduino/libraries/ArduinoJson/src/ArduinoJson.h \
  /home/lab/Arduino/libraries/ArduinoJson/src/ArduinoJson.hpp \
- /home/lab/Arduino/libraries/ArduinoJson/src/ArduinoJson/Configuration.hpp \
- /home/lab/.arduino15/packages/esp32/tools/esp32-arduino-libs/idf-release_v5.3-cfea4f7c-v1/esp32s3/include/esp_driver_ledc/include/driver/ledc.h
+ /home/lab/Arduino/libraries/ArduinoJson/src/ArduinoJson/Configuration.hpp
