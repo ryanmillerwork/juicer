@@ -22,6 +22,8 @@ change to "#define USB_PRODUCT "juicer3"
 
 git add juice_pump3/build/
 
+git commit -m "Add compiled ESP32 firmware build"
+
 git push origin main
 
 
