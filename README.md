@@ -50,3 +50,5 @@ cd ~/code/juicer/juice_pump3
 ~/code/bin/arduino-cli board list 
 
 ~/code/bin/arduino-cli upload --fqbn esp32:esp32:adafruit_feather_esp32s3_reversetft -p /dev/ttyACM0 --input-dir ./build/ .
+
+sudo systemctl restart dserv
