@@ -29,6 +29,7 @@ git push origin main
 
 
 # on homebase
+# initial setup
 
 cd ~/code
 
@@ -39,6 +40,10 @@ sudo curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/ins
 ~/code/bin/arduino-cli core install esp32:esp32
 
 git clone https://github.com/ryanmillerwork/juicer.git
+
+# just to upload code
+
+unplug/replug usb to microcontroller
 
 cd ~/code/juicer/juice_pump3
 
