@@ -1,0 +1,152 @@
+[
+  {
+    "Sourcefile": null,
+    "Include": "",
+    "Includepath": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/cores/esp32"
+  },
+  {
+    "Sourcefile": null,
+    "Include": "",
+    "Includepath": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/variants/adafruit_feather_esp32s3_reversetft"
+  },
+  {
+    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
+    "Include": "Adafruit_GFX.h",
+    "Includepath": "/home/lab/Arduino/libraries/Adafruit_GFX_Library"
+  },
+  {
+    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
+    "Include": "Adafruit_I2CDevice.h",
+    "Includepath": "/home/lab/Arduino/libraries/Adafruit_BusIO"
+  },
+  {
+    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
+    "Include": "Wire.h",
+    "Includepath": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/Wire/src"
+  },
+  {
+    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
+    "Include": "SPI.h",
+    "Includepath": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/SPI/src"
+  },
+  {
+    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
+    "Include": "Adafruit_ST7789.h",
+    "Includepath": "/home/lab/Arduino/libraries/Adafruit_ST7735_and_ST7789_Library"
+  },
+  {
+    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
+    "Include": "Adafruit_NeoPixel.h",
+    "Includepath": "/home/lab/Arduino/libraries/Adafruit_NeoPixel"
+  },
+  {
+    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
+    "Include": "Preferences.h",
+    "Includepath": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/Preferences/src"
+  },
+  {
+    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
+    "Include": "ArduinoJson.h",
+    "Includepath": "/home/lab/Arduino/libraries/ArduinoJson/src"
+  },
+  {
+    "Sourcefile": "/home/lab/bin/juicer/juice_pump3/build/sketch/juice_pump3.ino.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_GFX_Library/Adafruit_GFX.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_GFX_Library/Adafruit_GrayOLED.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_GFX_Library/Adafruit_SPITFT.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_GFX_Library/glcdfont.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_BusIO/Adafruit_BusIO_Register.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_BusIO/Adafruit_GenericDevice.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_BusIO/Adafruit_I2CDevice.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_BusIO/Adafruit_SPIDevice.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/Wire/src/Wire.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/SPI/src/SPI.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_ST7735_and_ST7789_Library/Adafruit_ST7735.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_ST7735_and_ST7789_Library/Adafruit_ST7789.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_ST7735_and_ST7789_Library/Adafruit_ST7796S.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_ST7735_and_ST7789_Library/Adafruit_ST77xx.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_NeoPixel/Adafruit_NeoPixel.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_NeoPixel/esp.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_NeoPixel/esp8266.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/Arduino/libraries/Adafruit_NeoPixel/kendyte_k210.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/lab/.arduino15/packages/esp32/hardware/esp32/3.1.1/libraries/Preferences/src/Preferences.cpp",
+    "Include": "",
+    "Includepath": null
+  }
+]
