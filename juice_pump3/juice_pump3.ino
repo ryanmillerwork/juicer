@@ -155,7 +155,7 @@ Preferences preferences;
 const int voltageReadingPin = A1;   // Analog input pin from the voltage divider.
 const int NUM_READINGS = 25;        // Number of readings to take the median of
 float voltageSamples[NUM_READINGS]; // Array for storing the readings
-const int NUM_MEANS = 60;        // Number of readings to track for calculating charging/discharging
+const int NUM_MEANS = 300;        // Number of readings to track for calculating charging/discharging
 float voltageMeans[NUM_MEANS];   // Array for storing the mean readings
 int voltageSampleIndex = 0;         // Keeps track of which reading we're on
 const float ADC_TO_VOLT = 0.0008059;// 3.3 / 4095.0;  Conversion factor: ADC reading to voltage.
