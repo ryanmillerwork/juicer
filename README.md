@@ -1,3 +1,24 @@
+# using github actions:
+
+# automatically compiles on pushes. to make sure the release is stored, tag it:
+
+git tag v3.0.0
+git push origin v3.0.0
+
+
+# to pull the last tagged version
+gh release list
+gh release download v3.0.0 -p "*.bin"
+
+OR
+
+wget https://github.com/ryanmillerwork/juicer/releases/download/v3.0.0/juice_pump3.ino.bin
+
+# to pull the latest 
+gh run list
+gh run download RUN_ID --name compiled-binary
+
+
 compile on hb-server
 
 # get juicer code
