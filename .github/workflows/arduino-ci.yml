@@ -41,9 +41,9 @@ jobs:
       - name: Compile Arduino Sketch
         run: arduino-cli compile --fqbn esp32:esp32:adafruit_feather_esp32s3_reversetft --build-path build ./juice_pump3
       
-      # Upload as artifact (for immediate access)
+      # Upload as artifact (with specific version)
       - name: Upload Compiled Binary as Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v2  # Changed from v3 to v2
         with:
           name: compiled-binary
           path: build/juice_pump3.ino.bin
