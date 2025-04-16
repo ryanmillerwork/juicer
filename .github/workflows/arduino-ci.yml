@@ -14,13 +14,13 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Install Arduino CLI 1.2.0
+      - name: Install Arduino CLI v1.2.0
         run: |
-          # Download and install Arduino CLI version 1.2.0 to $HOME/bin
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s -- -b $HOME/bin 1.2.0
-          # Add $HOME/bin to the PATH for subsequent steps
+          # Use "v1.2.0" instead of "1.2.0" to match the release tag format
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s -- -b $HOME/bin v1.2.0
+          # Add the CLI install directory to PATH for later steps
           echo "$HOME/bin" >> $GITHUB_PATH
-          # Verify installation
+          # Verify the installation
           arduino-cli version
 
       - name: Update Arduino CLI Core Index
@@ -35,14 +35,12 @@ jobs:
           arduino-cli lib install "Adafruit ST7789"
           arduino-cli lib install "Adafruit NeoPixel"
           arduino-cli lib install "ArduinoJson"
-          # SPI and Preferences are included in the core
+          # Libraries like SPI and Preferences are bundled in the core
 
       - name: Patch USB_PRODUCT Definition
         run: |
-          # Define the path to the pins_arduino.h file for the custom variant.
           FILE_PATH="$HOME/.arduino15/packages/esp32/hardware/esp32/3.1.1/variants/adafruit_feather_esp32s3_reversetft/pins_arduino.h"
           if [ -f "$FILE_PATH" ]; then
-            # Use sed to replace the USB_PRODUCT definition with "juicer3"
             sed -i 's/#define USB_PRODUCT .*/#define USB_PRODUCT "juicer3"/' "$FILE_PATH"
           else
             echo "Error: File not found at $FILE_PATH"
