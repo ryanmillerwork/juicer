@@ -37,6 +37,23 @@ jobs:
             echo "Error: File not found at $FILE_PATH"
             exit 1
           fi
-
+          
       - name: Compile Arduino Sketch
         run: arduino-cli compile --fqbn esp32:esp32:adafruit_feather_esp32s3_reversetft --build-path build ./juice_pump3
+      
+      # Upload as artifact (for immediate access)
+      - name: Upload Compiled Binary as Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: compiled-binary
+          path: build/juice_pump3.ino.bin
+          retention-days: 90
+          
+      # Create release when a tag is pushed
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: build/juice_pump3.ino.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
