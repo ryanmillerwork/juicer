@@ -1,34 +1,25 @@
 name: Arduino CI for Juicer3
-
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
-
-      - name: Install Arduino CLI v1.2.0
-        run: |
-          # Use "v1.2.0" instead of "1.2.0" to match the release tag format
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s -- -b $HOME/bin v1.2.0
-          # Add the CLI install directory to PATH for later steps
-          echo "$HOME/bin" >> $GITHUB_PATH
-          # Verify the installation
-          arduino-cli version
-
+      
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v1
+        
       - name: Update Arduino CLI Core Index
         run: arduino-cli core update-index
-
+        
       - name: Install ESP32 Core 3.1.1
         run: arduino-cli core install esp32:esp32@3.1.1
-
+        
       - name: Install Required Libraries
         run: |
           arduino-cli lib install "Adafruit GFX Library"
@@ -36,7 +27,7 @@ jobs:
           arduino-cli lib install "Adafruit NeoPixel"
           arduino-cli lib install "ArduinoJson"
           # Libraries like SPI and Preferences are bundled in the core
-
+          
       - name: Patch USB_PRODUCT Definition
         run: |
           FILE_PATH="$HOME/.arduino15/packages/esp32/hardware/esp32/3.1.1/variants/adafruit_feather_esp32s3_reversetft/pins_arduino.h"
@@ -46,6 +37,6 @@ jobs:
             echo "Error: File not found at $FILE_PATH"
             exit 1
           fi
-
+          
       - name: Compile Arduino Sketch
         run: arduino-cli compile --fqbn esp32:esp32:adafruit_feather_esp32s3_reversetft --build-path build .
