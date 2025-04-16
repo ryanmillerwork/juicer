@@ -23,7 +23,7 @@ jobs:
       - name: Install Required Libraries
         run: |
           arduino-cli lib install "Adafruit GFX Library"
-          arduino-cli lib install "Adafruit ST7789"
+          arduino-cli lib install "Adafruit ST7735 and ST7789 Library"
           arduino-cli lib install "Adafruit NeoPixel"
           arduino-cli lib install "ArduinoJson"
           # Libraries like SPI and Preferences are bundled in the core
