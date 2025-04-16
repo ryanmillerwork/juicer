@@ -43,7 +43,7 @@ jobs:
 
       # Upload as artifact (with specific version)
       - name: Upload Compiled Binary as Artifact
-        uses: actions/upload-artifact@v3.1.2
+        uses: actions/upload-artifact@v2
         with:
           name: compiled-binary
           path: build/juice_pump3.ino.bin
