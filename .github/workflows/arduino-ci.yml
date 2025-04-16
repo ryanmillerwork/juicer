@@ -1,0 +1,51 @@
+name: Arduino CI for Juicer3
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install Arduino CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          # Add the CLI to PATH. Adjust if necessary.
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Update Arduino CLI core index
+        run: arduino-cli core update-index
+
+      - name: Install ESP32 core 3.1.1
+        run: arduino-cli core install esp32:esp32@3.1.1
+
+      - name: Install required libraries
+        run: |
+          arduino-cli lib install "Adafruit GFX Library"
+          arduino-cli lib install "Adafruit ST7789"
+          arduino-cli lib install "Adafruit NeoPixel"
+          arduino-cli lib install "ArduinoJson"
+          # Additional libraries (SPI, Preferences) are part of the core
+      
+      - name: Patch USB_PRODUCT definition
+        run: |
+          # Define the path to the pins_arduino.h file for the custom variant.
+          FILE_PATH="$HOME/.arduino15/packages/esp32/hardware/esp32/3.1.1/variants/adafruit_feather_esp32s3_reversetft/pins_arduino.h"
+          if [ -f "$FILE_PATH" ]; then
+            sed -i 's/#define USB_PRODUCT .*/#define USB_PRODUCT "juicer3"/' "$FILE_PATH"
+          else
+            echo "Error: File not found at $FILE_PATH"
+            exit 1
+          fi
+
+      - name: Compile Arduino Sketch
+        run: |
+          # Adjust the sketch directory if your .ino file is located elsewhere.
+          arduino-cli compile --fqbn esp32:esp32:adafruit_feather_esp32s3_reversetft --build-path build .
