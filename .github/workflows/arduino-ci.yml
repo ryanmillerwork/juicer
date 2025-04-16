@@ -17,7 +17,7 @@ jobs:
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v1
         with:
-          version: 'latest'
+          version: '1.2.0'  # Use your local version
 
       - name: Update Arduino CLI Core Index
         run: arduino-cli core update-index
@@ -31,11 +31,10 @@ jobs:
           arduino-cli lib install "Adafruit ST7789"
           arduino-cli lib install "Adafruit NeoPixel"
           arduino-cli lib install "ArduinoJson"
-          # Note: Libraries like SPI and Preferences are bundled in the core
+          # Additional libraries like SPI and Preferences are part of the core
 
       - name: Patch USB_PRODUCT Definition
         run: |
-          # Define the file path for the custom variant pins file
           FILE_PATH="$HOME/.arduino15/packages/esp32/hardware/esp32/3.1.1/variants/adafruit_feather_esp32s3_reversetft/pins_arduino.h"
           if [ -f "$FILE_PATH" ]; then
             sed -i 's/#define USB_PRODUCT .*/#define USB_PRODUCT "juicer3"/' "$FILE_PATH"
