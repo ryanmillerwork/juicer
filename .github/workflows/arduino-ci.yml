@@ -37,6 +37,6 @@ jobs:
             echo "Error: File not found at $FILE_PATH"
             exit 1
           fi
-          
+
       - name: Compile Arduino Sketch
-        run: arduino-cli compile --fqbn esp32:esp32:adafruit_feather_esp32s3_reversetft --build-path build .
+        run: arduino-cli compile --fqbn esp32:esp32:adafruit_feather_esp32s3_reversetft --build-path build ./juice_pump3
