@@ -93,6 +93,15 @@ if f=200, ml/s = 200/(600*0.5) = 0.67 ml/s
 
 {"set": {"flow_rate": 0.67}}
 
+# setting purge volume
+
+screen /dev/ttyACM0 115200
+
+{"get": ["purge_vol"]}
+
+{"set": {"purge_vol": 20}}
+
+
 
 
 
