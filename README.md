@@ -45,13 +45,14 @@ change to "#define USB_PRODUCT "juicer3"
 ~/bin/arduino-cli compile --fqbn esp32:esp32:adafruit_feather_esp32s3_reversetft --build-path ~/bin/juicer/juice_pump3/build ~/bin/juicer/juice_pump3/
 
 # upload from hb-server to ESP32-s3
-
+```bash
 ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
 
 ~/bin/arduino-cli upload \
   --fqbn esp32:esp32:adafruit_feather_esp32s3_reversetft \
   --port /dev/ttyACM0 \
   --input-dir ~/bin/juicer/juice_pump3/build
+```
 
 
 # push back
