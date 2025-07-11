@@ -616,7 +616,7 @@ void check_serial_connection() {
     Serial.println("Serial disconnected. Restarting serial...");
     Serial.end();
     delay(1000); // Let the USB stack settle
-    Serial.begin(SERIAL_BAUD);
+    Serial.begin(2000000);
   }
 }
 
