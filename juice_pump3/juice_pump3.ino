@@ -48,6 +48,7 @@ unsigned long water_start_time = 0; // Keeps track of when you first press manua
 bool pump_running = false;        // Keeps track of if pump is running
 uint32_t pump_stop_time = 0;      // What time to stop the pump
 bool sched_disp_update = false;   // For when you want to update the display but not quite yet
+bool serialConnected = false;
 
 const int pwmChannel = 0;
 const int pwmResolution = 8; // 8-bit resolution
@@ -604,13 +605,25 @@ float compute_voltage_median() {
   return tempArr[NUM_READINGS / 2];  // For n==25, this returns element index 12.
 }
 
+void check_serial_connection() {
+  if (Serial && !serialConnected) {
+    serialConnected = true;
+    Serial.println("Serial connected!");
+  }
 
+  if (!Serial && serialConnected) {
+    serialConnected = false;
+    Serial.println("Serial disconnected. Restarting serial...");
+    Serial.end();
+    delay(1000); // Let the USB stack settle
+    Serial.begin(SERIAL_BAUD);
+  }
+}
 
 
 void setup() {
 
   Serial.begin(2000000);
-  while(!Serial) delay(10);
   Serial.setRxBufferSize(128);  // intended to speed things up. make sure its not too small...  Set RX buffer to 128 bytes for 128 characters max, assuming UTF-8
 
   // Setup preferences
@@ -685,6 +698,7 @@ void setup() {
 }
 
 void loop() {
+  check_serial_connection();
   check_buttons();
   check_serial_commands();
   check_for_pump_stop();
