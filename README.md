@@ -104,6 +104,16 @@ if f=200, ml/s = 200/(600*0.5) = 0.67 ml/s
 
 {"set": {"flow_rate": 0.67}}
 
+~3 months after calibration, testing accuracy and precision of 15 individual 1 mL dispersements:
+
+range: 0.94 -- 1.00
+
+mean: 0.97
+
+median: 0.97
+
+STD: 0.02
+
 # setting purge volume
 
 screen /dev/ttyACM0 115200
