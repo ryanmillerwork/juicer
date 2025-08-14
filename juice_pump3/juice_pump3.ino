@@ -69,6 +69,8 @@ Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(1, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
 Preferences preferences;
 
+// test with screen /dev/ttyACM0
+
 /*
  * Available API Commands:
  *
