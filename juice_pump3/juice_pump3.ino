@@ -331,6 +331,17 @@ void check_for_pump_stop() {
 
 void check_serial_commands() {
   if (Serial.available() > 0) {
+    // Synchronize to the start of a JSON command, discarding any extraneous characters.
+    // This helps prevent parsing errors from noise or leftover data in the buffer.
+    while (Serial.available() > 0 && Serial.peek() != '{') {
+      Serial.read();
+    }
+    
+    // If we didn't find the start of a command, exit and wait.
+    if (Serial.available() == 0) {
+      return;
+    }
+
     String command = Serial.readStringUntil('\n');
     command.trim();
     StaticJsonDocument<200> doc;
@@ -610,12 +621,12 @@ float compute_voltage_median() {
 void check_serial_connection() {
   if (Serial && !serialConnected) {
     serialConnected = true;
-    Serial.println("Serial connected!");
+    // Serial.println("Serial connected!");
   }
 
   if (!Serial && serialConnected) {
     serialConnected = false;
-    Serial.println("Serial disconnected. Restarting serial...");
+    // Serial.println("Serial disconnected. Restarting serial...");
     Serial.end();
     delay(1000); // Let the USB stack settle
     Serial.begin(2000000);
@@ -637,12 +648,12 @@ void setup() {
   target_hz = min(static_cast<int>(target_rps * PULSES_PER_STEP * STEPS_PER_REV), MAX_PWM_FREQ_MOTOR);
 
   // Print debug info after configuration
-  Serial.print("Initial target_rps: ");
-  Serial.println(target_rps);
-  Serial.print("Initial target_hz: ");
-  Serial.println(target_hz);
-  Serial.print("Initial voltage_mult: ");
-  Serial.println(voltage_mult);
+  // Serial.print("Initial target_rps: ");
+  // Serial.println(target_rps);
+  // Serial.print("Initial target_hz: ");
+  // Serial.println(target_hz);
+  // Serial.print("Initial voltage_mult: ");
+  // Serial.println(voltage_mult);
 
   // Setup backlight and power
   pinMode(TFT_BACKLITE, OUTPUT);
