@@ -49,7 +49,13 @@ bool pump_running = false;        // Keeps track of if pump is running
 uint32_t pump_stop_time = 0;      // What time to stop the pump
 bool sched_disp_update = false;   // For when you want to update the display but not quite yet
 bool serialConnected = false;
-bool juice_present = false;       // Tracks if juice is detected by capacitive sensor
+
+// Analog juice level monitoring variables
+float juice_sum = 0.0;                    // Running sum of readings
+int juice_reading_count = 0;              // Number of readings since last average
+unsigned long last_juice_reading_time = 0;  // For 50Hz timing (every 20ms)
+unsigned long last_juice_average_time = 0;  // For 5-second averaging
+float juice_level = 0.0;                 // The current 5-second average
 
 const int pwmChannel = 0;
 const int pwmResolution = 8; // 8-bit resolution
@@ -116,7 +122,7 @@ Preferences preferences;
  *    - {"get": ["charging"]}
  *      - Retrieves the status of whether the battery is charging or not
  *    - {"get": ["juice_level"]}
- *      - Retrieves the juice level status: "present" or "empty"
+ *      - Retrieves the juice level as analog value (5-second average of capacitive sensor)
  *    - {"get": ["<unknown_parameter>"]}
  *      - Returns "Unknown parameter" for any unrecognized parameter.
  *
@@ -145,7 +151,7 @@ Preferences preferences;
 
 // new
 // #define REMOTE_TOGGLE_PIN 13  // Replaced with juice level detection
-#define JUICE_LEVEL_PIN 13  // Capacitive water detector (LOW = water present, HIGH = empty)
+#define JUICE_LEVEL_PIN A4  // Capacitive touch sensor for analog juice level readings
 
 #define DMODE0_PIN 5
 #define DMODE1_PIN 6
@@ -241,9 +247,27 @@ void handle_calibration(int n, int on, int off) {
   update_display();
 }
 
-void check_juice_level() {
-  // Capacitive sensor: LOW = water present, HIGH = empty
-  juice_present = (digitalRead(JUICE_LEVEL_PIN) == LOW);
+void take_juice_reading() {
+  // Take reading every 20ms (50 readings per second)
+  if (millis() - last_juice_reading_time >= 20) {
+    juice_sum += analogRead(JUICE_LEVEL_PIN);
+    juice_reading_count++;
+    last_juice_reading_time = millis();
+  }
+}
+
+void calc_juice_average() {
+  // Calculate average every 5 seconds
+  if (millis() - last_juice_average_time >= 5000) {
+    if (juice_reading_count > 0) {
+      juice_level = juice_sum / juice_reading_count;
+      
+      // Reset for next averaging period
+      juice_sum = 0.0;
+      juice_reading_count = 0;
+    }
+    last_juice_average_time = millis();
+  }
 }
 
 void check_buttons() {
@@ -529,7 +553,7 @@ void check_serial_commands() {
         else if (param == "voltage_mult") responseDoc["voltage_mult"] = voltage_mult;
         else if (param == "charging") responseDoc["charging"] = charging;
         else if (param == "pump_voltage") responseDoc["pump_voltage"] = compute_voltage_median();
-        else if (param == "juice_level") responseDoc["juice_level"] = juice_present ? "present" : "empty";
+        else if (param == "juice_level") responseDoc["juice_level"] = juice_level;
         else responseDoc[param] = "Unknown parameter";
       }
     }
@@ -674,7 +698,7 @@ void setup() {
   pinMode(DMODE2_PIN, OUTPUT);
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN, OUTPUT);
-  pinMode(JUICE_LEVEL_PIN, INPUT_PULLUP); // Capacitive sensor pin
+  // JUICE_LEVEL_PIN (A4) is analog - no pinMode needed for analog pins
   pinMode(SWITCH_D0_PIN, INPUT_PULLUP); // D0 is pulled HIGH by default
   pinMode(SWITCH_D1_PIN, INPUT_PULLDOWN);
   pinMode(SWITCH_D2_PIN, INPUT_PULLDOWN);
@@ -703,13 +727,15 @@ void setup() {
   pixels.setBrightness(75);
   pixels.show();
 
-  // initialize this timer to current time
+  // initialize timers to current time
   lastVoltageMeanTime = millis();
+  last_juice_average_time = millis();
 }
 
 void loop() {
   check_serial_connection();
-  check_juice_level();
+  take_juice_reading();
+  calc_juice_average();
   check_buttons();
   check_serial_commands();
   check_for_pump_stop();
