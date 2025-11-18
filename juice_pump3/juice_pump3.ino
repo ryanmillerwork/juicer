@@ -49,6 +49,7 @@ bool pump_running = false;        // Keeps track of if pump is running
 uint32_t pump_stop_time = 0;      // What time to stop the pump
 bool sched_disp_update = false;   // For when you want to update the display but not quite yet
 bool serialConnected = false;
+bool juice_present = false;       // Tracks if juice is detected by capacitive sensor
 
 const int pwmChannel = 0;
 const int pwmResolution = 8; // 8-bit resolution
@@ -114,6 +115,8 @@ Preferences preferences;
  *      - Retrieves the multiplier to account for the voltage divider ratio
  *    - {"get": ["charging"]}
  *      - Retrieves the status of whether the battery is charging or not
+ *    - {"get": ["juice_level"]}
+ *      - Retrieves the juice level status: "present" or "empty"
  *    - {"get": ["<unknown_parameter>"]}
  *      - Returns "Unknown parameter" for any unrecognized parameter.
  *
@@ -141,7 +144,8 @@ Preferences preferences;
 // #define EN_PIN 5
 
 // new
-#define REMOTE_TOGGLE_PIN 13
+// #define REMOTE_TOGGLE_PIN 13  // Replaced with juice level detection
+#define JUICE_LEVEL_PIN 13  // Capacitive water detector (LOW = water present, HIGH = empty)
 
 #define DMODE0_PIN 5
 #define DMODE1_PIN 6
@@ -178,7 +182,7 @@ void update_display(bool highlight_flow = false, bool highlight_purge = false) {
   tft.fillScreen(ST77XX_BLACK);
 
   if (purging) tft.fillRect(0, 29, 240, 24, 0x0020a8);  // Background rectangle
-  if (manual_watering || remote_watering || serial_watering) tft.fillRect(0, 5, 240, 24, 0x0020a8); // Background rectangle
+  if (manual_watering || serial_watering) tft.fillRect(0, 5, 240, 24, 0x0020a8); // Background rectangle
 
   writeTextToScreen(10, 20, ST77XX_WHITE, "Flow rate: " + String(flow_rate) + " mL/s");
   writeTextToScreen(10, 44, ST77XX_WHITE, "Purge Vol: " + String(purge_vol) + " mL");
@@ -237,6 +241,11 @@ void handle_calibration(int n, int on, int off) {
   update_display();
 }
 
+void check_juice_level() {
+  // Capacitive sensor: LOW = water present, HIGH = empty
+  juice_present = (digitalRead(JUICE_LEVEL_PIN) == LOW);
+}
+
 void check_buttons() {
   // Check for button down for reset
   if (digitalRead(SWITCH_D0_PIN) == LOW && !reset_pressed) {
@@ -249,7 +258,7 @@ void check_buttons() {
   }
 
   // Purge button (S1)
-  if (digitalRead(SWITCH_D1_PIN) == HIGH && !purging && !remote_watering && !manual_watering) {
+  if (digitalRead(SWITCH_D1_PIN) == HIGH && !purging && !manual_watering) {
     purging = true;
     pump_stop_time = millis() + purge_vol / flow_rate * 1000;
     start_pump(pixels.Color(255, 255, 0));
@@ -257,20 +266,14 @@ void check_buttons() {
   }
 
   // Manual water button (S2)
-  if (digitalRead(SWITCH_D2_PIN) == HIGH && !purging && !remote_watering && !manual_watering) {
+  if (digitalRead(SWITCH_D2_PIN) == HIGH && !purging && !manual_watering) {
     manual_watering = true;
     water_start_time = millis();
     start_pump(pixels.Color(255, 0, 255));
     update_display(true, false); // Highlight flow rate line
   }
 
-  // Remote water toggle
-  if (digitalRead(REMOTE_TOGGLE_PIN) == HIGH && !purging && !remote_watering && !manual_watering) {
-    remote_watering = true;
-    water_start_time = millis();
-    start_pump(pixels.Color(0, 255, 255));
-    update_display(true, false); // Highlight flow rate line
-  }
+  // Remote water toggle functionality removed - pin 13 now used for juice level detection
 }
 
 void check_for_pump_stop() {
@@ -296,14 +299,7 @@ void check_for_pump_stop() {
     update_display(); // Reset highlight
   }
 
-  if (remote_watering && !digitalRead(REMOTE_TOGGLE_PIN)) {
-    // Line went to zero, stop pump and calculate reward_mls
-    reward_mls += ((millis() - water_start_time) / 1000.0) * flow_rate;
-    remote_watering = false;
-    reward_number++;
-    stop_pump();
-    update_display(); // Reset highlight
-  }
+  // Remote watering functionality removed - pin 13 now used for juice level detection
 
   if (calibration_in_progress) {
     if (calibration_count < calibration_n) {
@@ -533,6 +529,7 @@ void check_serial_commands() {
         else if (param == "voltage_mult") responseDoc["voltage_mult"] = voltage_mult;
         else if (param == "charging") responseDoc["charging"] = charging;
         else if (param == "pump_voltage") responseDoc["pump_voltage"] = compute_voltage_median();
+        else if (param == "juice_level") responseDoc["juice_level"] = juice_present ? "present" : "empty";
         else responseDoc[param] = "Unknown parameter";
       }
     }
@@ -677,7 +674,7 @@ void setup() {
   pinMode(DMODE2_PIN, OUTPUT);
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN, OUTPUT);
-  pinMode(REMOTE_TOGGLE_PIN, INPUT_PULLDOWN);
+  pinMode(JUICE_LEVEL_PIN, INPUT_PULLUP); // Capacitive sensor pin
   pinMode(SWITCH_D0_PIN, INPUT_PULLUP); // D0 is pulled HIGH by default
   pinMode(SWITCH_D1_PIN, INPUT_PULLDOWN);
   pinMode(SWITCH_D2_PIN, INPUT_PULLDOWN);
@@ -712,6 +709,7 @@ void setup() {
 
 void loop() {
   check_serial_connection();
+  check_juice_level();
   check_buttons();
   check_serial_commands();
   check_for_pump_stop();
