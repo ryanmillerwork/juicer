@@ -122,7 +122,7 @@ Preferences preferences;
  *    - {"get": ["charging"]}
  *      - Retrieves the status of whether the battery is charging or not
  *    - {"get": ["juice_level"]}
- *      - Retrieves the juice level as analog value (5-second average of capacitive sensor)
+ *      - Retrieves the juice level measured via capacitive touch (5-second average of touch counts)
  *    - {"get": ["<unknown_parameter>"]}
  *      - Returns "Unknown parameter" for any unrecognized parameter.
  *
@@ -151,7 +151,7 @@ Preferences preferences;
 
 // new
 // #define REMOTE_TOGGLE_PIN 13  // Replaced with juice level detection
-#define JUICE_LEVEL_PIN A4  // Capacitive touch sensor for analog juice level readings
+#define JUICE_LEVEL_PIN A4  // Capacitive touch sensor input (must be a touch-capable pad)
 
 #define DMODE0_PIN 5
 #define DMODE1_PIN 6
@@ -250,8 +250,13 @@ void handle_calibration(int n, int on, int off) {
 void take_juice_reading() {
   // Take reading every 20ms (50 readings per second)
   if (millis() - last_juice_reading_time >= 20) {
-    juice_sum += analogRead(JUICE_LEVEL_PIN);
-    juice_reading_count++;
+    int32_t reading = touchRead(JUICE_LEVEL_PIN);
+
+    // touchRead returns -1 if the pin is not touch capable or reading failed
+    if (reading >= 0) {
+      juice_sum += static_cast<float>(reading);
+      juice_reading_count++;
+    }
     last_juice_reading_time = millis();
   }
 }
