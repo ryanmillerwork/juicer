@@ -51,11 +51,11 @@ bool sched_disp_update = false;   // For when you want to update the display but
 bool serialConnected = false;
 
 // Analog juice level monitoring variables
-float juice_sum = 0.0;                    // Running sum of readings
-int juice_reading_count = 0;              // Number of readings since last average
+float juice_sum[NUM_JUICE_LEVEL_PINS] = {0.0};          // Running sums per pad
+int juice_reading_count[NUM_JUICE_LEVEL_PINS] = {0};    // Number of readings since last average per pad
 unsigned long last_juice_reading_time = 0;  // For 50Hz timing (every 20ms)
 unsigned long last_juice_average_time = 0;  // For 5-second averaging
-float juice_level = 0.0;                 // The current 5-second average
+float juice_level[NUM_JUICE_LEVEL_PINS] = {0.0};        // The current 5-second averages
 
 const int pwmChannel = 0;
 const int pwmResolution = 8; // 8-bit resolution
@@ -151,7 +151,8 @@ Preferences preferences;
 
 // new
 // #define REMOTE_TOGGLE_PIN 13  // Replaced with juice level detection
-#define JUICE_LEVEL_PIN A4  // Capacitive touch sensor input (must be a touch-capable pad)
+const int JUICE_LEVEL_PINS[] = {A3, A4, A5};  // Capacitive touch sensor inputs (must be touch-capable pads)
+const size_t NUM_JUICE_LEVEL_PINS = sizeof(JUICE_LEVEL_PINS) / sizeof(JUICE_LEVEL_PINS[0]);
 
 #define DMODE0_PIN 5
 #define DMODE1_PIN 6
@@ -249,13 +250,17 @@ void handle_calibration(int n, int on, int off) {
 
 void take_juice_reading() {
   // Take reading every 20ms (50 readings per second)
-  if (millis() - last_juice_reading_time >= 20) {
-    int32_t reading = touchRead(JUICE_LEVEL_PIN);
+  if (pump_running) return;
 
-    // touchRead returns -1 if the pin is not touch capable or reading failed
-    if (reading >= 0) {
-      juice_sum += static_cast<float>(reading);
-      juice_reading_count++;
+  if (millis() - last_juice_reading_time >= 20) {
+    for (size_t i = 0; i < NUM_JUICE_LEVEL_PINS; i++) {
+      int32_t reading = touchRead(JUICE_LEVEL_PINS[i]);
+
+      // touchRead returns -1 if the pin is not touch capable or reading failed
+      if (reading >= 0) {
+        juice_sum[i] += static_cast<float>(reading);
+        juice_reading_count[i]++;
+      }
     }
     last_juice_reading_time = millis();
   }
@@ -264,12 +269,13 @@ void take_juice_reading() {
 void calc_juice_average() {
   // Calculate average every 5 seconds
   if (millis() - last_juice_average_time >= 5000) {
-    if (juice_reading_count > 0) {
-      juice_level = juice_sum / juice_reading_count;
-      
+    for (size_t i = 0; i < NUM_JUICE_LEVEL_PINS; i++) {
+      if (juice_reading_count[i] > 0) {
+        juice_level[i] = juice_sum[i] / juice_reading_count[i];
+      }
       // Reset for next averaging period
-      juice_sum = 0.0;
-      juice_reading_count = 0;
+      juice_sum[i] = 0.0;
+      juice_reading_count[i] = 0;
     }
     last_juice_average_time = millis();
   }
@@ -558,7 +564,12 @@ void check_serial_commands() {
         else if (param == "voltage_mult") responseDoc["voltage_mult"] = voltage_mult;
         else if (param == "charging") responseDoc["charging"] = charging;
         else if (param == "pump_voltage") responseDoc["pump_voltage"] = compute_voltage_median();
-        else if (param == "juice_level") responseDoc["juice_level"] = juice_level;
+        else if (param == "juice_level") {
+          JsonArray juiceArray = responseDoc.createNestedArray("juice_level");
+          for (size_t i = 0; i < NUM_JUICE_LEVEL_PINS; i++) {
+            juiceArray.add(juice_level[i]);
+          }
+        }
         else responseDoc[param] = "Unknown parameter";
       }
     }
@@ -703,7 +714,7 @@ void setup() {
   pinMode(DMODE2_PIN, OUTPUT);
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN, OUTPUT);
-  // JUICE_LEVEL_PIN (A4) is analog - no pinMode needed for analog pins
+  // JUICE_LEVEL_PINS (A3/A4/A5) are analog - no pinMode needed for analog pins
   pinMode(SWITCH_D0_PIN, INPUT_PULLUP); // D0 is pulled HIGH by default
   pinMode(SWITCH_D1_PIN, INPUT_PULLDOWN);
   pinMode(SWITCH_D2_PIN, INPUT_PULLDOWN);
