@@ -25,6 +25,8 @@ const int PULSES_PER_STEP = 32;
 const int STEPS_PER_REV = 200;
 const int MAX_RPS = 8;
 const int MAX_PWM_FREQ_MOTOR = PULSES_PER_STEP * STEPS_PER_REV * MAX_RPS;
+const int JUICE_LEVEL_PINS[] = {A3, A4, A5};  // Capacitive touch sensor inputs (must be touch-capable pads)
+const size_t NUM_JUICE_LEVEL_PINS = sizeof(JUICE_LEVEL_PINS) / sizeof(JUICE_LEVEL_PINS[0]);
 
 float flow_rate;                  // This is the empirically determined flow rate given the target_rps, stored in flash
 float purge_vol;                  // Volume to purge when pressing the purge button, stored in flash
@@ -151,8 +153,6 @@ Preferences preferences;
 
 // new
 // #define REMOTE_TOGGLE_PIN 13  // Replaced with juice level detection
-const int JUICE_LEVEL_PINS[] = {A3, A4, A5};  // Capacitive touch sensor inputs (must be touch-capable pads)
-const size_t NUM_JUICE_LEVEL_PINS = sizeof(JUICE_LEVEL_PINS) / sizeof(JUICE_LEVEL_PINS[0]);
 
 #define DMODE0_PIN 5
 #define DMODE1_PIN 6
