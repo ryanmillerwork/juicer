@@ -96,6 +96,8 @@ Preferences preferences;
  * 2. Do Commands (only 1 allowed per request):
  *    - {"do": "abort"}
  *      - Aborts the current operation, stops the pump, and updates reward metrics.
+ *    - {"do": "reset"}
+ *      - Resets reward counters (number and mLs), same as pressing the reset hardware button.
  *    - {"do": {"reward": <float>}} {"do": {"reward": 0.8}}
  *      - Dispenses a reward of the specified amount (must be > 0).
  *    - {"do": {"purge": <float>}}
@@ -124,7 +126,7 @@ Preferences preferences;
  *    - {"get": ["charging"]}
  *      - Retrieves the status of whether the battery is charging or not
  *    - {"get": ["juice_level"]}
- *      - Retrieves the juice level measured via capacitive touch (5-second average of touch counts)
+ *      - Retrieves an array of juice levels [A3, A4, A5], each a 5-second average of touch counts
  *    - {"get": ["<unknown_parameter>"]}
  *      - Returns "Unknown parameter" for any unrecognized parameter.
  *
@@ -219,6 +221,12 @@ void stop_pump() {
   pump_running = false;
 }
 
+void reset_counters(bool refresh_display = true) {
+  reward_number = 0;
+  reward_mls = 0;
+  if (refresh_display) update_display();
+}
+
 void handle_reward(float reward_value, uint32_t color) {
   if (serial_watering) {
     reward_mls -= serial_vol; 
@@ -285,9 +293,7 @@ void check_buttons() {
   // Check for button down for reset
   if (digitalRead(SWITCH_D0_PIN) == LOW && !reset_pressed) {
     reset_pressed = true;
-    reward_number = 0;
-    reward_mls = 0;
-    update_display();
+    reset_counters();
   } else if (digitalRead(SWITCH_D0_PIN) == HIGH) {
     reset_pressed = false;  // Reset state when button is released
   }
@@ -489,6 +495,9 @@ void check_serial_commands() {
             serial_watering = false;
             calibration_in_progress = false;
           }
+          sched_disp_update = true;
+        } else if (action == "reset") {
+          reset_counters(false);
           sched_disp_update = true;
         } else {
           success = false;
