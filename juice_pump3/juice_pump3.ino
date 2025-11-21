@@ -92,6 +92,8 @@ Preferences preferences;
  *      - Sets the target revolutions per second (must be > 0 and <= MAX_RPS).
  *    - {"set": {"voltage_mult": <float>}} {"set": {"voltage_mult": 11.909}}
  *      - Sets the multiplier to account for the voltage divider ratio
+ *    - {"set": {"direction": "<forward|reverse>"}}  {"set": {"direction": "reverse"}}
+ *      - Applies only to the accompanying pump action in the same request (reward/purge/calibration), then reverts to default (forward).
  *
  * 2. Do Commands (only 1 allowed per request):
  *    - {"do": "abort"}
@@ -180,11 +182,19 @@ unsigned long lastVoltageReadingTime = 0; // Keeps track of last reading so we d
 unsigned long lastVoltageMeanTime = 0;    // keeps track of last time we grabbed the mean for tracking charging
 bool charging = false;            // Global boolean initialized to false
 
+enum PumpDirection { DIR_FORWARD, DIR_REVERSE };
+const PumpDirection DEFAULT_DIRECTION = DIR_FORWARD;
+PumpDirection calibration_direction = DEFAULT_DIRECTION;
+
 
 void writeTextToScreen(int x, int y, uint16_t color, String text) {
   tft.setCursor(x, y);
   tft.setTextColor(color);
   tft.println(text);
+}
+
+void apply_direction(PumpDirection dir) {
+  digitalWrite(DIR_PIN, dir == DIR_FORWARD ? HIGH : LOW);
 }
 
 void update_display(bool highlight_flow = false, bool highlight_purge = false) {
@@ -200,7 +210,8 @@ void update_display(bool highlight_flow = false, bool highlight_purge = false) {
   writeTextToScreen(10, 116, ST77XX_WHITE, "Reward mLs: " + String(reward_mls, 3));
 }
 
-void start_pump(uint32_t color = pixels.Color(255, 255, 255)) {
+void start_pump(uint32_t color = pixels.Color(255, 255, 255), PumpDirection direction = DEFAULT_DIRECTION) {
+  apply_direction(direction);
   digitalWrite(DMODE0_PIN, HIGH), digitalWrite(DMODE1_PIN, HIGH), digitalWrite(DMODE2_PIN, HIGH);
   // ledcWrite(stepChannel, 128);  // Duty cycle for motor speed
   ledcWrite(STEP_PIN, 128);
@@ -219,6 +230,7 @@ void stop_pump() {
   pixels.clear();
   pixels.show();
   pump_running = false;
+  apply_direction(DEFAULT_DIRECTION);  // Return to default direction after any run
 }
 
 void reset_counters(bool refresh_display = true) {
@@ -227,7 +239,7 @@ void reset_counters(bool refresh_display = true) {
   if (refresh_display) update_display();
 }
 
-void handle_reward(float reward_value, uint32_t color) {
+void handle_reward(float reward_value, uint32_t color, PumpDirection direction = DEFAULT_DIRECTION) {
   if (serial_watering) {
     reward_mls -= serial_vol; 
     reward_mls += ((millis() - water_start_time) / 1000.0) * flow_rate;
@@ -235,21 +247,22 @@ void handle_reward(float reward_value, uint32_t color) {
   serial_vol = reward_value;
   serial_watering = true;
   water_start_time = millis();
-  start_pump(color);
+  start_pump(color, direction);
   pump_stop_time = millis() + reward_value / flow_rate * 1000;
   reward_mls += reward_value;
   reward_number++;
   sched_disp_update = true;
 }
 
-void handle_calibration(int n, int on, int off) {
+void handle_calibration(int n, int on, int off, PumpDirection direction = DEFAULT_DIRECTION) {
   calibration_in_progress = true;
   calibration_n = n;
   calibration_on = on;
   calibration_off = off;
   calibration_count = 0;
+  calibration_direction = direction;
   calibration_start_time = millis();
-  start_pump(pixels.Color(0, 255, 0));
+  start_pump(pixels.Color(0, 255, 0), calibration_direction);
   reward_mls += calibration_on / 1000.0 * flow_rate;
   reward_number++;
   water_start_time = millis();
@@ -351,7 +364,7 @@ void check_for_pump_stop() {
       } else if (!pump_running && millis() >= calibration_start_time + calibration_off) {
         calibration_count++;
         if (calibration_count < calibration_n) {
-          start_pump(pixels.Color(0, 255, 0));
+          start_pump(pixels.Color(0, 255, 0), calibration_direction);
           water_start_time = millis();
           reward_mls += calibration_on / 1000.0 * flow_rate;
           reward_number++;
@@ -384,6 +397,9 @@ void check_serial_commands() {
     StaticJsonDocument<200> doc;
     StaticJsonDocument<400> responseDoc; // Response JSON object to collect status
     DeserializationError error = deserializeJson(doc, command);
+    PumpDirection requested_direction = DEFAULT_DIRECTION;
+    bool direction_override_requested = false;
+    bool pump_action_requested = false;
     
     if (error) {
       Serial.println("{\"status\": \"Invalid JSON format\"}");
@@ -476,6 +492,27 @@ void check_serial_commands() {
         sched_disp_update = true;
       }
 
+      if (setParams.containsKey("direction")) {
+        const char* dirValue = setParams["direction"];
+        if (dirValue != nullptr) {
+          String dirString = String(dirValue);
+          dirString.toLowerCase();
+          if (dirString == "reverse") {
+            requested_direction = DIR_REVERSE;
+            direction_override_requested = true;
+          } else if (dirString == "forward") {
+            requested_direction = DIR_FORWARD;
+            direction_override_requested = true;
+          } else {
+            success = false;
+            responseDoc["error"] = "Invalid direction value (use forward or reverse)";
+          }
+        } else {
+          success = false;
+          responseDoc["error"] = "Invalid direction value (use forward or reverse)";
+        }
+      }
+
       responseDoc["status"] = success ? "success" : "failure";
     }
 
@@ -513,7 +550,8 @@ void check_serial_commands() {
           validCommand = true;
           float reward_value = doParams["reward"].as<float>();
           if (reward_value > 0) {
-            handle_reward(reward_value, pixels.Color(255, 255, 255));
+            pump_action_requested = true;
+            handle_reward(reward_value, pixels.Color(255, 255, 255), direction_override_requested ? requested_direction : DEFAULT_DIRECTION);
           } else {
             success = false;
             responseDoc["error"] = "Invalid reward value";
@@ -524,9 +562,10 @@ void check_serial_commands() {
           validCommand = true;
           float purge_amount = doParams["purge"].as<float>();
           if (purge_amount > 0) {
+            pump_action_requested = true;
             purging = true;
             pump_stop_time = millis() + purge_amount / flow_rate * 1000;
-            start_pump(pixels.Color(255, 255, 0));
+            start_pump(pixels.Color(255, 255, 0), direction_override_requested ? requested_direction : DEFAULT_DIRECTION);
             sched_disp_update = true;
           } else {
             success = false;
@@ -542,7 +581,8 @@ void check_serial_commands() {
           int off = calibrationParams["off"].as<int>();
 
           if (n > 0 && on > 0 && off > 0) {
-            handle_calibration(n, on, off);
+            pump_action_requested = true;
+            handle_calibration(n, on, off, direction_override_requested ? requested_direction : DEFAULT_DIRECTION);
           } else {
             success = false;
             responseDoc["error"] = "Invalid calibration parameters.";
@@ -556,6 +596,11 @@ void check_serial_commands() {
       }
 
       responseDoc["status"] = success ? "success" : "failure";
+    }
+
+    if (direction_override_requested && !pump_action_requested) {
+      responseDoc["status"] = "failure";
+      responseDoc["error"] = "direction requires a pump action in the same request";
     }
 
     // Handle "get" operations
@@ -732,7 +777,7 @@ void setup() {
   digitalWrite(DMODE0_PIN, LOW);
   digitalWrite(DMODE1_PIN, LOW);
   digitalWrite(DMODE2_PIN, LOW);
-  digitalWrite(DIR_PIN, HIGH);
+  apply_direction(DEFAULT_DIRECTION);
 
   // Set the pin mode and ensure the pin is LOW initially
   pinMode(STEP_PIN, OUTPUT);
