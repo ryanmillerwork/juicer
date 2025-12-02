@@ -25,8 +25,8 @@ const int PULSES_PER_STEP = 32;
 const int STEPS_PER_REV = 200;
 const int MAX_RPS = 8;
 const int MAX_PWM_FREQ_MOTOR = PULSES_PER_STEP * STEPS_PER_REV * MAX_RPS;
-const int JUICE_LEVEL_PINS[] = {A3, A4, A5};  // Capacitive touch sensor inputs (must be touch-capable pads)
-const size_t NUM_JUICE_LEVEL_PINS = sizeof(JUICE_LEVEL_PINS) / sizeof(JUICE_LEVEL_PINS[0]);
+const int JUICE_LEVEL_LOW_PIN = A2;   // Lower sensor at 50ml level (LOW = water detected)
+const int JUICE_LEVEL_HIGH_PIN = A3;  // Upper sensor at 250ml level (LOW = water detected)
 
 float flow_rate;                  // This is the empirically determined flow rate given the target_rps, stored in flash
 float purge_vol;                  // Volume to purge when pressing the purge button, stored in flash
@@ -52,12 +52,9 @@ uint32_t pump_stop_time = 0;      // What time to stop the pump
 bool sched_disp_update = false;   // For when you want to update the display but not quite yet
 bool serialConnected = false;
 
-// Analog juice level monitoring variables
-float juice_sum[NUM_JUICE_LEVEL_PINS] = {0.0};          // Running sums per pad
-int juice_reading_count[NUM_JUICE_LEVEL_PINS] = {0};    // Number of readings since last average per pad
-unsigned long last_juice_reading_time = 0;  // For 50Hz timing (every 20ms)
-unsigned long last_juice_average_time = 0;  // For 5-second averaging
-float juice_level[NUM_JUICE_LEVEL_PINS] = {0.0};        // The current 5-second averages
+// Digital juice level monitoring variables
+String juice_level = "level<50";  // Current juice level status
+unsigned long last_juice_check_time = 0;  // For 5-second checks
 
 const int pwmChannel = 0;
 const int pwmResolution = 8; // 8-bit resolution
@@ -128,7 +125,7 @@ Preferences preferences;
  *    - {"get": ["charging"]}
  *      - Retrieves the status of whether the battery is charging or not
  *    - {"get": ["juice_level"]}
- *      - Retrieves an array of juice levels [A3, A4, A5], each a 5-second average of touch counts
+ *      - Retrieves juice level status string: "level>250", "250>level>50", "level<50", or sensor error message
  *    - {"get": ["<unknown_parameter>"]}
  *      - Returns "Unknown parameter" for any unrecognized parameter.
  *
@@ -269,36 +266,25 @@ void handle_calibration(int n, int on, int off, PumpDirection direction = DEFAUL
   update_display();
 }
 
-void take_juice_reading() {
-  // Take reading every 20ms (50 readings per second)
-  if (pump_running) return;
-
-  if (millis() - last_juice_reading_time >= 20) {
-    for (size_t i = 0; i < NUM_JUICE_LEVEL_PINS; i++) {
-      int32_t reading = touchRead(JUICE_LEVEL_PINS[i]);
-
-      // touchRead returns -1 if the pin is not touch capable or reading failed
-      if (reading >= 0) {
-        juice_sum[i] += static_cast<float>(reading);
-        juice_reading_count[i]++;
-      }
+void check_juice_level() {
+  // Check juice level every 5 seconds
+  if (millis() - last_juice_check_time >= 5000) {
+    // Read digital sensors (LOW = water detected)
+    bool low_sensor = (digitalRead(JUICE_LEVEL_LOW_PIN) == LOW);
+    bool high_sensor = (digitalRead(JUICE_LEVEL_HIGH_PIN) == LOW);
+    
+    // Determine juice level based on sensor readings
+    if (low_sensor && high_sensor) {
+      juice_level = "level>250";
+    } else if (low_sensor && !high_sensor) {
+      juice_level = "250>level>50";
+    } else if (!low_sensor && !high_sensor) {
+      juice_level = "level<50";
+    } else {  // !low_sensor && high_sensor
+      juice_level = "sensor error: a2 high but a3 low!";
     }
-    last_juice_reading_time = millis();
-  }
-}
-
-void calc_juice_average() {
-  // Calculate average every 5 seconds
-  if (millis() - last_juice_average_time >= 5000) {
-    for (size_t i = 0; i < NUM_JUICE_LEVEL_PINS; i++) {
-      if (juice_reading_count[i] > 0) {
-        juice_level[i] = juice_sum[i] / juice_reading_count[i];
-      }
-      // Reset for next averaging period
-      juice_sum[i] = 0.0;
-      juice_reading_count[i] = 0;
-    }
-    last_juice_average_time = millis();
+    
+    last_juice_check_time = millis();
   }
 }
 
@@ -618,12 +604,7 @@ void check_serial_commands() {
         else if (param == "voltage_mult") responseDoc["voltage_mult"] = voltage_mult;
         else if (param == "charging") responseDoc["charging"] = charging;
         else if (param == "pump_voltage") responseDoc["pump_voltage"] = compute_voltage_median();
-        else if (param == "juice_level") {
-          JsonArray juiceArray = responseDoc.createNestedArray("juice_level");
-          for (size_t i = 0; i < NUM_JUICE_LEVEL_PINS; i++) {
-            juiceArray.add(juice_level[i]);
-          }
-        }
+        else if (param == "juice_level") responseDoc["juice_level"] = juice_level;
         else responseDoc[param] = "Unknown parameter";
       }
     }
@@ -768,7 +749,9 @@ void setup() {
   pinMode(DMODE2_PIN, OUTPUT);
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN, OUTPUT);
-  // JUICE_LEVEL_PINS (A3/A4/A5) are analog - no pinMode needed for analog pins
+  // Setup juice level sensor pins (digital inputs)
+  pinMode(JUICE_LEVEL_LOW_PIN, INPUT);
+  pinMode(JUICE_LEVEL_HIGH_PIN, INPUT);
   pinMode(SWITCH_D0_PIN, INPUT_PULLUP); // D0 is pulled HIGH by default
   pinMode(SWITCH_D1_PIN, INPUT_PULLDOWN);
   pinMode(SWITCH_D2_PIN, INPUT_PULLDOWN);
@@ -799,13 +782,12 @@ void setup() {
 
   // initialize timers to current time
   lastVoltageMeanTime = millis();
-  last_juice_average_time = millis();
+  last_juice_check_time = millis();
 }
 
 void loop() {
   check_serial_connection();
-  take_juice_reading();
-  calc_juice_average();
+  check_juice_level();
   check_buttons();
   check_serial_commands();
   check_for_pump_stop();
