@@ -22,6 +22,40 @@ Reward 0.5 mL and get the response:
 timeout 3s bash -lc 'dev=$(readlink -f /dev/serial/by-id/*juicer*); printf '"'"'{"do":{"reward":0.5},"get":["reward_mls","reward_number"]}\n'"'"' | socat - "file:$dev,raw,echo=0,b2000000"'
 ```
 
+## Code examples (send/receive)
+
+### Python (pyserial, Linux path)
+```python
+import serial, time
+port = "/dev/ttyACM0"  # or the resolved /dev/serial/by-id/... path
+s = serial.Serial(port, 2_000_000, timeout=2, write_timeout=2, dsrdtr=True, rtscts=False)
+s.write(b'{"get":["flow_rate"]}\n'); s.flush()
+time.sleep(0.4)
+print(s.readline().decode().strip())
+s.close()
+```
+
+### MATLAB (Linux path)
+```matlab
+port = "/dev/ttyACM0"; % or "/dev/serial/by-id/usb-...juicer..."
+s = serialport(port, 2000000, "Timeout", 2);
+writeline(s, '{"do":{"reward":0.5},"get":["reward_mls","reward_number"]}');
+resp = readline(s)
+clear s
+```
+
+### Tcl (Linux path)
+```tcl
+set port "/dev/ttyACM0" ;# or "/dev/serial/by-id/usb-...juicer..."
+set f [open $port r+]
+fconfigure $f -translation binary -buffering none -mode "2000000,n,8,1" -blocking 1
+puts -nonewline $f "{\"get\":[\"flow_rate\"]}\n"
+flush $f
+gets $f resp
+close $f
+puts $resp
+```
+
 ## Command reference
 
 Send JSON objects with any combination of `set`, `do`, and `get` fields. Only one `do` operation is allowed per request. Responses include a `status` field (`success` or `failure`) and any requested values.
