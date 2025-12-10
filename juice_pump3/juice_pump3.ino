@@ -87,10 +87,8 @@ Preferences preferences;
  *      - Sets the purge volume (must be > 0).
  *    - {"set": {"target_rps": <float>}} {"set": {"target_rps": 3}}
  *      - Sets the target revolutions per second (must be > 0 and <= MAX_RPS).
- *    - {"set": {"voltage_mult": <float>}} {"set": {"voltage_mult": 11.909}}
- *      - Sets the multiplier to account for the voltage divider ratio
- *    - {"set": {"direction": "<forward|reverse>"}}  {"set": {"direction": "reverse"}}
- *      - Applies only to the accompanying pump action in the same request (reward/purge/calibration), then reverts to default (forward).
+ *    - {"set": {"direction": "<left|right>"}}  {"set": {"direction": "right"}}
+ *      - Persists the pump direction (default is "left", meaning pump from right to left) for all future pump actions.
  *
  * 2. Do Commands (only 1 allowed per request):
  *    - {"do": "abort"}
@@ -118,12 +116,8 @@ Preferences preferences;
  *      - Retrieves the total amount of reward dispensed in milliliters.
  *    - {"get": ["reward_number"]}
  *      - Retrieves the total number of rewards dispensed.
- *    - {"get": ["pump_voltage"]}
- *      - Retrieves the current voltage supplied to the pump
- *    - {"get": ["voltage_mult"]}
- *      - Retrieves the multiplier to account for the voltage divider ratio
- *    - {"get": ["charging"]}
- *      - Retrieves the status of whether the battery is charging or not
+ *    - {"get": ["direction"]}
+ *      - Retrieves the persisted pump direction ("left" or "right")
  *    - {"get": ["juice_level"]}
  *      - Retrieves juice level status string: "level>250", "250>level>50", "level<50", or sensor error message
  *    - {"get": ["<unknown_parameter>"]}
@@ -166,22 +160,15 @@ Preferences preferences;
 #define SWITCH_D1_PIN 1
 #define SWITCH_D2_PIN 2
 
-// Values for monitoring the pump voltage
-const int voltageReadingPin = A1;   // Analog input pin from the voltage divider.
-const int NUM_READINGS = 25;        // Number of readings to take the median of
-float voltageSamples[NUM_READINGS]; // Array for storing the readings
-const int NUM_MEANS = 300;        // Number of readings to track for calculating charging/discharging
-float voltageMeans[NUM_MEANS];   // Array for storing the mean readings
-int voltageSampleIndex = 0;         // Keeps track of which reading we're on
-const float ADC_TO_VOLT = 0.0008059;// 3.3 / 4095.0;  Conversion factor: ADC reading to voltage.
-float voltage_mult = 11.4;     // Multiplier to recover the full-scale voltage.  11.908
-unsigned long lastVoltageReadingTime = 0; // Keeps track of last reading so we dont do it too often
-unsigned long lastVoltageMeanTime = 0;    // keeps track of last time we grabbed the mean for tracking charging
-bool charging = false;            // Global boolean initialized to false
 
-enum PumpDirection { DIR_FORWARD, DIR_REVERSE };
-const PumpDirection DEFAULT_DIRECTION = DIR_FORWARD;
+enum PumpDirection { DIR_LEFT, DIR_RIGHT };
+const PumpDirection DEFAULT_DIRECTION = DIR_LEFT;
+PumpDirection current_direction = DEFAULT_DIRECTION;
 PumpDirection calibration_direction = DEFAULT_DIRECTION;
+
+String direction_to_string(PumpDirection dir) {
+  return dir == DIR_RIGHT ? "right" : "left";
+}
 
 
 void writeTextToScreen(int x, int y, uint16_t color, String text) {
@@ -191,7 +178,7 @@ void writeTextToScreen(int x, int y, uint16_t color, String text) {
 }
 
 void apply_direction(PumpDirection dir) {
-  digitalWrite(DIR_PIN, dir == DIR_FORWARD ? HIGH : LOW);
+  digitalWrite(DIR_PIN, dir == DIR_LEFT ? HIGH : LOW);
 }
 
 void update_display(bool highlight_flow = false, bool highlight_purge = false) {
@@ -207,7 +194,7 @@ void update_display(bool highlight_flow = false, bool highlight_purge = false) {
   writeTextToScreen(10, 116, ST77XX_WHITE, "Reward mLs: " + String(reward_mls, 3));
 }
 
-void start_pump(uint32_t color = pixels.Color(255, 255, 255), PumpDirection direction = DEFAULT_DIRECTION) {
+void start_pump_with_direction(uint32_t color, PumpDirection direction) {
   apply_direction(direction);
   digitalWrite(DMODE0_PIN, HIGH), digitalWrite(DMODE1_PIN, HIGH), digitalWrite(DMODE2_PIN, HIGH);
   // ledcWrite(stepChannel, 128);  // Duty cycle for motor speed
@@ -219,6 +206,10 @@ void start_pump(uint32_t color = pixels.Color(255, 255, 255), PumpDirection dire
   pump_running = true;
 }
 
+void start_pump(uint32_t color = pixels.Color(255, 255, 255)) {
+  start_pump_with_direction(color, current_direction);
+}
+
 void stop_pump() {
   ledcWrite(STEP_PIN, 0);
   // ledcWrite(stepChannel, 0);  // To start the pump
@@ -227,7 +218,7 @@ void stop_pump() {
   pixels.clear();
   pixels.show();
   pump_running = false;
-  apply_direction(DEFAULT_DIRECTION);  // Return to default direction after any run
+  apply_direction(current_direction);  // Return to stored direction after any run
 }
 
 void reset_counters(bool refresh_display = true) {
@@ -236,7 +227,7 @@ void reset_counters(bool refresh_display = true) {
   if (refresh_display) update_display();
 }
 
-void handle_reward(float reward_value, uint32_t color, PumpDirection direction = DEFAULT_DIRECTION) {
+void handle_reward(float reward_value, uint32_t color) {
   if (serial_watering) {
     reward_mls -= serial_vol; 
     reward_mls += ((millis() - water_start_time) / 1000.0) * flow_rate;
@@ -244,22 +235,22 @@ void handle_reward(float reward_value, uint32_t color, PumpDirection direction =
   serial_vol = reward_value;
   serial_watering = true;
   water_start_time = millis();
-  start_pump(color, direction);
+  start_pump(color);
   pump_stop_time = millis() + reward_value / flow_rate * 1000;
   reward_mls += reward_value;
   reward_number++;
   sched_disp_update = true;
 }
 
-void handle_calibration(int n, int on, int off, PumpDirection direction = DEFAULT_DIRECTION) {
+void handle_calibration(int n, int on, int off) {
   calibration_in_progress = true;
   calibration_n = n;
   calibration_on = on;
   calibration_off = off;
   calibration_count = 0;
-  calibration_direction = direction;
+  calibration_direction = current_direction;
   calibration_start_time = millis();
-  start_pump(pixels.Color(0, 255, 0), calibration_direction);
+  start_pump_with_direction(pixels.Color(0, 255, 0), calibration_direction);
   reward_mls += calibration_on / 1000.0 * flow_rate;
   reward_number++;
   water_start_time = millis();
@@ -350,7 +341,7 @@ void check_for_pump_stop() {
       } else if (!pump_running && millis() >= calibration_start_time + calibration_off) {
         calibration_count++;
         if (calibration_count < calibration_n) {
-          start_pump(pixels.Color(0, 255, 0), calibration_direction);
+          start_pump_with_direction(pixels.Color(0, 255, 0), calibration_direction);
           water_start_time = millis();
           reward_mls += calibration_on / 1000.0 * flow_rate;
           reward_number++;
@@ -383,9 +374,6 @@ void check_serial_commands() {
     StaticJsonDocument<200> doc;
     StaticJsonDocument<400> responseDoc; // Response JSON object to collect status
     DeserializationError error = deserializeJson(doc, command);
-    PumpDirection requested_direction = DEFAULT_DIRECTION;
-    bool direction_override_requested = false;
-    bool pump_action_requested = false;
     
     if (error) {
       Serial.println("{\"status\": \"Invalid JSON format\"}");
@@ -435,19 +423,6 @@ void check_serial_commands() {
         }
       }
       
-      if (setParams.containsKey("voltage_mult")) {
-        float new_voltage_mult = setParams["voltage_mult"].as<float>();
-        if (new_voltage_mult > 0) {
-          voltage_mult = new_voltage_mult;
-          preferences.putFloat("voltage_mult", voltage_mult);
-          // preferences.end();  // Force commit changes
-          // preferences.begin("watering", false);  // Reopen the namespace
-        } else {
-          success = false;
-          responseDoc["error"] = "Invalid voltage_mult value";
-        }
-      }
-
       if (setParams.containsKey("purge_vol")) {
         float new_purge_vol = setParams["purge_vol"].as<float>();
         if (new_purge_vol > 0) {
@@ -483,19 +458,21 @@ void check_serial_commands() {
         if (dirValue != nullptr) {
           String dirString = String(dirValue);
           dirString.toLowerCase();
-          if (dirString == "reverse") {
-            requested_direction = DIR_REVERSE;
-            direction_override_requested = true;
-          } else if (dirString == "forward") {
-            requested_direction = DIR_FORWARD;
-            direction_override_requested = true;
+          if (dirString == "right") {
+            current_direction = DIR_RIGHT;
+            calibration_direction = current_direction;
+            preferences.putInt("direction", static_cast<int>(current_direction));
+          } else if (dirString == "left") {
+            current_direction = DIR_LEFT;
+            calibration_direction = current_direction;
+            preferences.putInt("direction", static_cast<int>(current_direction));
           } else {
             success = false;
-            responseDoc["error"] = "Invalid direction value (use forward or reverse)";
+            responseDoc["error"] = "Invalid direction value (use left or right)";
           }
         } else {
           success = false;
-          responseDoc["error"] = "Invalid direction value (use forward or reverse)";
+          responseDoc["error"] = "Invalid direction value (use left or right)";
         }
       }
 
@@ -536,8 +513,7 @@ void check_serial_commands() {
           validCommand = true;
           float reward_value = doParams["reward"].as<float>();
           if (reward_value > 0) {
-            pump_action_requested = true;
-            handle_reward(reward_value, pixels.Color(255, 255, 255), direction_override_requested ? requested_direction : DEFAULT_DIRECTION);
+            handle_reward(reward_value, pixels.Color(255, 255, 255));
           } else {
             success = false;
             responseDoc["error"] = "Invalid reward value";
@@ -548,10 +524,9 @@ void check_serial_commands() {
           validCommand = true;
           float purge_amount = doParams["purge"].as<float>();
           if (purge_amount > 0) {
-            pump_action_requested = true;
             purging = true;
             pump_stop_time = millis() + purge_amount / flow_rate * 1000;
-            start_pump(pixels.Color(255, 255, 0), direction_override_requested ? requested_direction : DEFAULT_DIRECTION);
+            start_pump(pixels.Color(255, 255, 0));
             sched_disp_update = true;
           } else {
             success = false;
@@ -567,8 +542,7 @@ void check_serial_commands() {
           int off = calibrationParams["off"].as<int>();
 
           if (n > 0 && on > 0 && off > 0) {
-            pump_action_requested = true;
-            handle_calibration(n, on, off, direction_override_requested ? requested_direction : DEFAULT_DIRECTION);
+            handle_calibration(n, on, off);
           } else {
             success = false;
             responseDoc["error"] = "Invalid calibration parameters.";
@@ -584,11 +558,6 @@ void check_serial_commands() {
       responseDoc["status"] = success ? "success" : "failure";
     }
 
-    if (direction_override_requested && !pump_action_requested) {
-      responseDoc["status"] = "failure";
-      responseDoc["error"] = "direction requires a pump action in the same request";
-    }
-
     // Handle "get" operations
     if (doc.containsKey("get")) {
       JsonArray getArray = doc["get"].as<JsonArray>();
@@ -601,9 +570,7 @@ void check_serial_commands() {
         else if (param == "target_rps") responseDoc["target_rps"] = target_rps;
         else if (param == "reward_mls") responseDoc["reward_mls"] = reward_mls;
         else if (param == "reward_number") responseDoc["reward_number"] = reward_number;
-        else if (param == "voltage_mult") responseDoc["voltage_mult"] = voltage_mult;
-        else if (param == "charging") responseDoc["charging"] = charging;
-        else if (param == "pump_voltage") responseDoc["pump_voltage"] = compute_voltage_median();
+        else if (param == "direction") responseDoc["direction"] = direction_to_string(current_direction);
         else if (param == "juice_level") responseDoc["juice_level"] = juice_level;
         else responseDoc[param] = "Unknown parameter";
       }
@@ -622,73 +589,6 @@ void check_serial_commands() {
   }
 }
 
-void calc_charging() {
-  // static variable to track how many samples are in voltageMeans
-  static int numReadings = 0;
-
-  // Check if at least 1 second has passed since last reading
-  if ((millis() - lastVoltageMeanTime) > 1000) {
-    // Compute the new voltage sample (or median, in this case)
-    float thisMedian = compute_voltage_median();
-
-    // Update the last reading time (assumes this timing is acceptable)
-    lastVoltageMeanTime += 1000;
-
-    // Add the new sample to our array
-    if (numReadings < NUM_MEANS) {
-      voltageMeans[numReadings] = thisMedian;
-      numReadings++;
-    } else {
-      // If the array is full, shift all elements one position to the left
-      for (int i = 0; i < NUM_MEANS - 1; i++) {
-        voltageMeans[i] = voltageMeans[i + 1];
-      }
-      // Place the new sample in the last position
-      voltageMeans[NUM_MEANS - 1] = thisMedian;
-    }
-
-    // Compare the oldest and the newest samples to set charging state.
-    // If the newest sample is less than (oldest sample - 0.01), then it's not charging.
-    if (numReadings > 1) {
-      if (voltageMeans[numReadings - 1] < (voltageMeans[0] - 0.01))
-        charging = false;
-      else
-        charging = true;
-    }
-  }
-}
-
-
-void take_voltage_reading() {
-  if ((millis() - lastVoltageReadingTime) > 20) {
-    voltageSamples[voltageSampleIndex] = analogRead(voltageReadingPin) * ADC_TO_VOLT * voltage_mult;
-    voltageSampleIndex++;
-    if (voltageSampleIndex >= NUM_READINGS) {voltageSampleIndex = 0;}
-    lastVoltageReadingTime = millis();
-  }
-}
-
-float compute_voltage_median() {
-  float tempArr[NUM_READINGS];
-  // Copy the array so we do not modify the original values.
-  for (int i = 0; i < NUM_READINGS; i++) {
-    tempArr[i] = voltageSamples[i];
-  }
-  
-  // Simple bubble sort.
-  for (int i = 0; i < NUM_READINGS - 1; i++) {
-    for (int j = 0; j < NUM_READINGS - i - 1; j++) {
-      if (tempArr[j] > tempArr[j + 1]) {
-        float temp = tempArr[j];
-        tempArr[j] = tempArr[j + 1];
-        tempArr[j + 1] = temp;
-      }
-    }
-  }
-  
-  // For an odd-sized array, the median is the middle element.
-  return tempArr[NUM_READINGS / 2];  // For n==25, this returns element index 12.
-}
 
 void check_serial_connection() {
   if (Serial && !serialConnected) {
@@ -714,18 +614,12 @@ void setup() {
   // Setup preferences
   preferences.begin("watering", false); // open the watering namespace in read-write mode
   flow_rate = preferences.getFloat("flow_rate", 0.5);
-  purge_vol = preferences.getFloat("purge_vol", 5.0);
+  purge_vol = preferences.getFloat("purge_vol", 10.0);
   target_rps = preferences.getFloat("target_rps", 3.0);
-  voltage_mult = preferences.getFloat("voltage_mult", 11.909);
   target_hz = min(static_cast<int>(target_rps * PULSES_PER_STEP * STEPS_PER_REV), MAX_PWM_FREQ_MOTOR);
-
-  // Print debug info after configuration
-  // Serial.print("Initial target_rps: ");
-  // Serial.println(target_rps);
-  // Serial.print("Initial target_hz: ");
-  // Serial.println(target_hz);
-  // Serial.print("Initial voltage_mult: ");
-  // Serial.println(voltage_mult);
+  int stored_direction = preferences.getInt("direction", static_cast<int>(DEFAULT_DIRECTION));
+  current_direction = (stored_direction == static_cast<int>(DIR_RIGHT)) ? DIR_RIGHT : DIR_LEFT;
+  calibration_direction = current_direction;
 
   // Setup backlight and power
   pinMode(TFT_BACKLITE, OUTPUT);
@@ -760,7 +654,7 @@ void setup() {
   digitalWrite(DMODE0_PIN, LOW);
   digitalWrite(DMODE1_PIN, LOW);
   digitalWrite(DMODE2_PIN, LOW);
-  apply_direction(DEFAULT_DIRECTION);
+  apply_direction(current_direction);
 
   // Set the pin mode and ensure the pin is LOW initially
   pinMode(STEP_PIN, OUTPUT);
@@ -770,18 +664,12 @@ void setup() {
   ledcAttachChannel(STEP_PIN, target_hz, pwmResolution, ledcChannel);
   delay(10);
 
-  // Analog pin for reading pump supply voltage
-  // analogSetWidth(12);
-  // analogSetPinAttenuation(voltageReadingPin, ADC_ATTENDB_11);
-  analogSetPinAttenuation(voltageReadingPin, ADC_11db);
-
   // Initialize NeoPixel
   pixels.begin();
   pixels.setBrightness(75);
   pixels.show();
 
   // initialize timers to current time
-  lastVoltageMeanTime = millis();
   last_juice_check_time = millis();
 }
 
@@ -791,6 +679,4 @@ void loop() {
   check_buttons();
   check_serial_commands();
   check_for_pump_stop();
-  take_voltage_reading();
-  calc_charging();
 }
