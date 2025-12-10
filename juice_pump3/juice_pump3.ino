@@ -25,8 +25,7 @@ const int PULSES_PER_STEP = 32;
 const int STEPS_PER_REV = 200;
 const int MAX_RPS = 8;
 const int MAX_PWM_FREQ_MOTOR = PULSES_PER_STEP * STEPS_PER_REV * MAX_RPS;
-const int JUICE_LEVEL_LOW_PIN = A2;   // Lower sensor at 50ml level (LOW = water detected)
-const int JUICE_LEVEL_HIGH_PIN = A3;  // Upper sensor at 250ml level (LOW = water detected)
+const int JUICE_LEVEL_LOW_PIN = A2;   // Single lower sensor at ~50 mL level (LOW = water detected)
 
 float flow_rate;                  // This is the empirically determined flow rate given the target_rps, stored in flash
 float purge_vol;                  // Volume to purge when pressing the purge button, stored in flash
@@ -53,7 +52,7 @@ bool sched_disp_update = false;   // For when you want to update the display but
 bool serialConnected = false;
 
 // Digital juice level monitoring variables
-String juice_level = "level<50";  // Current juice level status
+String juice_level = "<50mLs";  // Current juice level status
 unsigned long last_juice_check_time = 0;  // For 5-second checks
 
 const int pwmChannel = 0;
@@ -258,23 +257,12 @@ void handle_calibration(int n, int on, int off) {
 }
 
 void check_juice_level() {
-  // Check juice level every 5 seconds
+  // Check juice level every 5 seconds using the single lower sensor
   if (millis() - last_juice_check_time >= 5000) {
-    // Read digital sensors (LOW = water detected)
-    bool low_sensor = (digitalRead(JUICE_LEVEL_LOW_PIN) == LOW);
-    bool high_sensor = (digitalRead(JUICE_LEVEL_HIGH_PIN) == LOW);
-    
-    // Determine juice level based on sensor readings
-    if (low_sensor && high_sensor) {
-      juice_level = "level>250";
-    } else if (low_sensor && !high_sensor) {
-      juice_level = "250>level>50";
-    } else if (!low_sensor && !high_sensor) {
-      juice_level = "level<50";
-    } else {  // !low_sensor && high_sensor
-      juice_level = "sensor error: a2 high but a3 low!";
-    }
-    
+    bool low_sensor = (digitalRead(JUICE_LEVEL_LOW_PIN) == LOW);  // LOW = water detected at >50 mL
+
+    juice_level = low_sensor ? ">50mLs" : "<50mLs";
+
     last_juice_check_time = millis();
   }
 }
@@ -643,9 +631,8 @@ void setup() {
   pinMode(DMODE2_PIN, OUTPUT);
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN, OUTPUT);
-  // Setup juice level sensor pins (digital inputs)
+  // Setup juice level sensor pin (digital input)
   pinMode(JUICE_LEVEL_LOW_PIN, INPUT);
-  pinMode(JUICE_LEVEL_HIGH_PIN, INPUT);
   pinMode(SWITCH_D0_PIN, INPUT_PULLUP); // D0 is pulled HIGH by default
   pinMode(SWITCH_D1_PIN, INPUT_PULLDOWN);
   pinMode(SWITCH_D2_PIN, INPUT_PULLDOWN);
