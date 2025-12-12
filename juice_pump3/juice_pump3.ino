@@ -25,7 +25,10 @@ const int PULSES_PER_STEP = 32;
 const int STEPS_PER_REV = 200;
 const int MAX_RPS = 8;
 const int MAX_PWM_FREQ_MOTOR = PULSES_PER_STEP * STEPS_PER_REV * MAX_RPS;
-const int JUICE_LEVEL_LOW_PIN = A2;   // Single lower sensor at ~50 mL level (LOW = water detected)
+// Juice level sensor input.
+// NOTE: GPIO4 is also the board's built-in I2C SCL pin (STEMMA QT header). If you use it for juice level,
+// you should not use the built-in I2C header at the same time.
+const int JUICE_LEVEL_LOW_PIN = 4;   // GPIO4 / SCL (LOW = water detected)
 
 float flow_rate;                  // This is the empirically determined flow rate given the target_rps, stored in flash
 float purge_vol;                  // Volume to purge when pressing the purge button, stored in flash
@@ -631,8 +634,9 @@ void setup() {
   pinMode(DMODE2_PIN, OUTPUT);
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN, OUTPUT);
-  // Setup juice level sensor pin (digital input)
-  pinMode(JUICE_LEVEL_LOW_PIN, INPUT);
+  // Setup juice level sensor pin (digital input).
+  // Use pull-up so the line is HIGH by default; the sensor should pull it LOW when liquid is detected.
+  pinMode(JUICE_LEVEL_LOW_PIN, INPUT_PULLUP);
   pinMode(SWITCH_D0_PIN, INPUT_PULLUP); // D0 is pulled HIGH by default
   pinMode(SWITCH_D1_PIN, INPUT_PULLDOWN);
   pinMode(SWITCH_D2_PIN, INPUT_PULLDOWN);
