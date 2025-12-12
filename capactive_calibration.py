@@ -83,6 +83,39 @@ def serial_json_command(ser, payload: dict) -> tuple[dict | None, str]:
     except Exception:
         return None, raw
 
+def _coerce_float_or_none(x):
+    """
+    Coerce a device-provided value into a float (for DB insertion) or None.
+
+    The pump/firmware may sometimes return sentinel strings like "<50" / ">50"
+    (or even bare "<" / ">") for under/over-range on a 0-100-ish scale.
+    Postgres rejects those for DOUBLE PRECISION, so we map them to:
+      - "<..." -> 0.0
+      - ">..." -> 100.0
+    """
+    if x is None:
+        return None
+    if isinstance(x, (int, float)):
+        return float(x)
+    if isinstance(x, str):
+        s = x.strip()
+        if not s:
+            return None
+        if s in {"<", "<="}:
+            return 0.0
+        if s in {">", ">="}:
+            return 100.0
+        if s[0] in {"<"}:
+            return 0.0
+        if s[0] in {">"}:
+            return 100.0
+        try:
+            return float(s)
+        except ValueError:
+            return None
+    # Unknown type from device -> NULL
+    return None
+
 def queue_run(
     conn,
     *,
@@ -204,6 +237,9 @@ def perform_run(
                 raise RuntimeError(f"Pump error: {parsed}")
 
             juice = parsed.get("juice_level") or [None, None, None]
+            a3 = _coerce_float_or_none(juice[0] if len(juice) > 0 else None)
+            a4 = _coerce_float_or_none(juice[1] if len(juice) > 1 else None)
+            a5 = _coerce_float_or_none(juice[2] if len(juice) > 2 else None)
             reward_mls = float(parsed.get("reward_mls", last_reward_mls))
             last_reward_mls = reward_mls
             if (direction or "").lower() == "reverse":
@@ -219,9 +255,9 @@ def perform_run(
                     """,
                     (
                         run_id,
-                        juice[0],
-                        juice[1],
-                        juice[2],
+                        a3,
+                        a4,
+                        a5,
                         None,
                         None,
                         reward_mls,
@@ -232,7 +268,7 @@ def perform_run(
             if (idx + 1) % 10 == 0:
                 print(
                     f"Reading {idx + 1}/{n_readings} -> "
-                    f"run_id={run_id}, a3={juice[0]}, a4={juice[1]}, a5={juice[2]}, "
+                    f"run_id={run_id}, a3={a3}, a4={a4}, a5={a5}, "
                     f"reward_mls={reward_mls}, mls_remaining={mls_remaining}"
                 )
             if period > 0:

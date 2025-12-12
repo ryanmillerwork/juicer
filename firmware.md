@@ -50,6 +50,37 @@ or
 
 ~/bin/arduino-cli compile --fqbn esp32:esp32:adafruit_feather_esp32s2_reversetft_juicer --build-path ~/bin/juicer/juice_pump3/build ~/bin/juicer/juice_pump3
 
+## Troubleshooting build failures
+
+If `arduino-cli compile` fails with:
+
+`Failed to extract libcrypto.so.1.1: decompression resulted in return code -1!`
+
+This is almost always either **(1) disk space / inode exhaustion** (often in `/tmp`) or **(2) a corrupted Arduino cache / staged download**.
+
+1) Check disk space + inodes:
+
+```bash
+df -h /tmp ~
+df -i /tmp ~
+```
+
+2) If space is tight in `/tmp`, point temp elsewhere:
+
+```bash
+export TMPDIR="$HOME/tmp"
+mkdir -p "$TMPDIR"
+```
+
+3) Clear caches and reinstall the ESP32 core/tools:
+
+```bash
+rm -rf ~/.arduino15/staging ~/.arduino15/cache
+~/bin/arduino-cli core update-index
+~/bin/arduino-cli core uninstall esp32:esp32
+~/bin/arduino-cli core install esp32:esp32@3.1.1
+```
+
 # upload from hb-server to ESP32-s3
 ```bash
 ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
