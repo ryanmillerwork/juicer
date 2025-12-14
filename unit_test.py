@@ -47,6 +47,8 @@ from serial.tools import list_ports
 
 BAUD = 2_000_000
 DEFAULT_TIMEOUT_S = 2.5
+DEFAULT_WRITE_TIMEOUT_S = 2.0
+DEFAULT_OPEN_SETTLE_S = 0.6  # opening the port can reset the ESP32; give USB CDC time to settle
 
 
 def find_port(preferred: str | None, debug: bool = False) -> str | None:
@@ -90,18 +92,12 @@ class JuicerClient:
     port: str
     baud: int = BAUD
     read_timeout_s: float = DEFAULT_TIMEOUT_S
-    write_timeout_s: float = DEFAULT_TIMEOUT_S
-    settle_s: float = 0.05
+    write_timeout_s: float = DEFAULT_WRITE_TIMEOUT_S
+    settle_s: float = DEFAULT_OPEN_SETTLE_S
+    exclusive: bool = True
 
     def __post_init__(self) -> None:
-        # Note: using a small blocking timeout avoids some flaky behavior seen with fully-nonblocking
-        # serial I/O on certain USB serial stacks when the device is resetting/re-enumerating.
-        self._ser = serial.Serial(
-            self.port,
-            self.baud,
-            timeout=self.read_timeout_s,
-            write_timeout=self.write_timeout_s,
-        )
+        self._ser = self._open_serial()
         # Mirror the working behavior in `test_connection.py` (some platforms need DTR/RTS asserted).
         try:
             self._ser.dtr = True
@@ -111,6 +107,50 @@ class JuicerClient:
             pass
         self._ser.reset_input_buffer()
         self._ser.reset_output_buffer()
+        time.sleep(self.settle_s)
+
+    def _open_serial(self) -> serial.Serial:
+        """
+        Open the serial port in the same style as `test_connection.py`.
+
+        Important: On some ESP32 USB CDC stacks, opening the port can reset the MCU or briefly stall I/O.
+        Using timeout=0 (non-blocking) matches our working `test_connection.py` approach.
+        """
+        # Prefer exclusive access so we fail fast if another process (screen/modemmanager/etc) has the port.
+        try:
+            return serial.Serial(
+                self.port,
+                self.baud,
+                timeout=0,
+                write_timeout=self.write_timeout_s,
+                exclusive=self.exclusive,
+            )
+        except TypeError:
+            # Older pyserial doesn't support exclusive=
+            return serial.Serial(
+                self.port,
+                self.baud,
+                timeout=0,
+                write_timeout=self.write_timeout_s,
+            )
+
+    def _reopen(self) -> None:
+        try:
+            self._ser.close()
+        except Exception:
+            pass
+        time.sleep(0.1)
+        self._ser = self._open_serial()
+        try:
+            self._ser.dtr = True
+            self._ser.rts = True
+        except Exception:
+            pass
+        try:
+            self._ser.reset_input_buffer()
+            self._ser.reset_output_buffer()
+        except Exception:
+            pass
         time.sleep(self.settle_s)
 
     def close(self) -> None:
@@ -164,7 +204,10 @@ class JuicerClient:
             msg += "\n"
 
         # Best-effort sync: clear anything pending so we associate response to this request.
-        self._ser.reset_input_buffer()
+        try:
+            self._ser.reset_input_buffer()
+        except Exception:
+            pass
         data = msg.encode("utf-8")
 
         # Write retry: the ESP32 can be mid-reset if DTR/RTS toggled elsewhere; a short retry helps.
@@ -176,7 +219,12 @@ class JuicerClient:
                 return self._readline_json(time.time() + timeout_s)
             except (serial.SerialTimeoutException, ProtocolError) as e:
                 last_exc = e
-                time.sleep(0.25)
+                # If we can't write, the port may be busy or the MCU may have reset.
+                # Reopen + settle matches the working "unplug/replug" recovery behavior.
+                try:
+                    self._reopen()
+                except Exception:
+                    time.sleep(0.25)
                 try:
                     self._ser.reset_input_buffer()
                 except Exception:
@@ -225,8 +273,26 @@ class JuicerTestBase(unittest.TestCase):
                 raise unittest.SkipTest("No juicer serial port found (set JUICER_PORT or use --port).")
 
             _GLOBAL_CLIENT = JuicerClient(port=port)
-            # Quick handshake: prove we can send/receive.
-            _GLOBAL_CLIENT.get("flow_rate")
+            print(f"[unit_test] Using {port}", file=sys.stderr)
+
+            # Quick handshake: prove we can send/receive (allow extra time for USB CDC reset/settle).
+            deadline = time.time() + 12.0
+            last: Exception | None = None
+            while time.time() < deadline:
+                try:
+                    _GLOBAL_CLIENT.get("flow_rate")
+                    last = None
+                    break
+                except Exception as e:
+                    last = e
+                    time.sleep(0.4)
+            if last is not None:
+                raise ProtocolError(
+                    "Unable to communicate with device during handshake. "
+                    "If `python test_connection.py` also fails, check that no other process is using the port "
+                    "(e.g. `screen`, Arduino Serial Monitor, ModemManager) and try unplug/replug.\n"
+                    f"Last error: {last!r}"
+                )
 
         cls.client = _GLOBAL_CLIENT
 
