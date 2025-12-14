@@ -215,6 +215,47 @@ class JuicerTestBase(unittest.TestCase):
     client: JuicerClient
     _saved_settings: dict[str, Any]
 
+    @classmethod
+    def setUpClass(cls) -> None:
+        global _GLOBAL_CLIENT, _GLOBAL_SAVED_SETTINGS
+
+        if _GLOBAL_CLIENT is None:
+            port = find_port(os.environ.get("JUICER_PORT"), debug=os.environ.get("JUICER_DEBUG") == "1")
+            if not port:
+                raise unittest.SkipTest("No juicer serial port found (set JUICER_PORT or use --port).")
+
+            _GLOBAL_CLIENT = JuicerClient(port=port)
+            # Quick handshake: prove we can send/receive.
+            _GLOBAL_CLIENT.get("flow_rate")
+
+        cls.client = _GLOBAL_CLIENT
+
+        if _GLOBAL_SAVED_SETTINGS is None:
+            # Snapshot current persisted settings so we can restore at process exit.
+            _GLOBAL_SAVED_SETTINGS = cls.client.request(
+                {"get": ["flow_rate", "purge_vol", "target_rps", "direction", "reward_mls", "reward_number"]}
+            )
+            cls._saved_settings = _GLOBAL_SAVED_SETTINGS
+
+            # Make reward counters deterministic for the suite.
+            cls.client.do("reset")
+        else:
+            cls._saved_settings = _GLOBAL_SAVED_SETTINGS
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        # Global cleanup handles restore/close once for the whole suite.
+        return
+
+    def assertStatusSuccess(self, resp: dict[str, Any]) -> None:
+        self.assertIn("status", resp, f"Expected a status field; got: {resp}")
+        self.assertEqual(resp.get("status"), "success", f"Expected status=success; got: {resp}")
+
+    def assertStatusFailure(self, resp: dict[str, Any]) -> None:
+        self.assertIn("status", resp, f"Expected a status field; got: {resp}")
+        self.assertEqual(resp.get("status"), "failure", f"Expected status=failure; got: {resp}")
+        self.assertIn("error", resp, f"Expected an error field; got: {resp}")
+
 
 # Global singleton to avoid opening/closing the serial port per TestCase class.
 # Opening/closing can toggle DTR/RTS and reset the ESP32, causing flaky timeouts.
@@ -248,48 +289,6 @@ def _global_cleanup() -> None:
 
 
 atexit.register(_global_cleanup)
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        global _GLOBAL_CLIENT, _GLOBAL_SAVED_SETTINGS
-
-        if _GLOBAL_CLIENT is None:
-            port = find_port(os.environ.get("JUICER_PORT"), debug=os.environ.get("JUICER_DEBUG") == "1")
-            if not port:
-                raise unittest.SkipTest("No juicer serial port found (set JUICER_PORT or use --port).")
-
-            _GLOBAL_CLIENT = JuicerClient(port=port)
-
-            # Quick handshake: prove we can send/receive.
-            _GLOBAL_CLIENT.get("flow_rate")
-
-        cls.client = _GLOBAL_CLIENT
-
-        if _GLOBAL_SAVED_SETTINGS is None:
-            # Snapshot current persisted settings so we can restore at process exit.
-            _GLOBAL_SAVED_SETTINGS = cls.client.request(
-                {"get": ["flow_rate", "purge_vol", "target_rps", "direction", "reward_mls", "reward_number"]}
-            )
-            cls._saved_settings = _GLOBAL_SAVED_SETTINGS
-
-            # Make reward counters deterministic for the suite.
-            cls.client.do("reset")
-        else:
-            cls._saved_settings = _GLOBAL_SAVED_SETTINGS
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        # Global cleanup handles restore/close once for the whole suite.
-        return
-
-    def assertStatusSuccess(self, resp: dict[str, Any]) -> None:
-        self.assertIn("status", resp, f"Expected a status field; got: {resp}")
-        self.assertEqual(resp.get("status"), "success", f"Expected status=success; got: {resp}")
-
-    def assertStatusFailure(self, resp: dict[str, Any]) -> None:
-        self.assertIn("status", resp, f"Expected a status field; got: {resp}")
-        self.assertEqual(resp.get("status"), "failure", f"Expected status=failure; got: {resp}")
-        self.assertIn("error", resp, f"Expected an error field; got: {resp}")
 
 
 class TestProtocolBasics(JuicerTestBase):
