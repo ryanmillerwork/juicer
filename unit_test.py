@@ -27,11 +27,11 @@ What gets tested (by class):
   - `test_do_reward_rejects_nonpositive`: `do.reward` rejects <= 0.
   - `test_do_purge_rejects_nonpositive`: `do.purge` rejects <= 0.
   - `test_do_calibration_rejects_invalid_params`: `do.calibration` rejects non-positive parameters.
-- `TestActuationSmallVolumes` (requires `JUICER_ACTUATE=1`)
+- `TestActuationSmallVolumes` (enabled by default; WILL move the pump briefly)
   - `test_reward_increments_counters`: small reward increments counters.
   - `test_purge_success_and_abort`: starts a small purge and exercises `do.abort`.
   - `test_calibration_start_and_abort`: starts a short calibration and exercises `do.abort`.
-- `TestPersistenceBestEffort` (requires `JUICER_TEST_PERSIST=1`)
+- `TestPersistenceBestEffort` (enabled by default; toggles DTR for a best-effort reset)
   - `test_direction_persists_across_soft_reset`: checks that `direction` persists across a best-effort DTR reset.
 
 Requirements:
@@ -39,19 +39,12 @@ Requirements:
 - pyserial (`pip install pyserial`)
 - ESP32 connected and running `juice_pump3.ino`
 
-Typical usage:
-- Auto-detect port:
-    python unit_test.py -v
-- Specify port:
-    python unit_test.py --port /dev/ttyACM0 -v
-- Allow small pump actuation tests (dispenses tiny amounts):
-    JUICER_ACTUATE=1 python unit_test.py -v
+Usage:
+- Just run it (prints commands/responses/delays; runs the full suite by default):
+    python unit_test.py
 
-Environment variables:
+Environment variables (optional):
 - JUICER_PORT: override serial port (e.g., /dev/ttyACM0 or COM15)
-- JUICER_ACTUATE=1: enable tests that call successful `do.reward`/`do.purge`/`do.calibration`
-- JUICER_TEST_PERSIST=1: enable persistence-across-reset tests (best-effort reset)
-- JUICER_TRACE=1: print commands, responses, and deliberate delays (very verbose; also auto-enabled with `-v`)
 """
 
 from __future__ import annotations
@@ -76,14 +69,13 @@ DEFAULT_TIMEOUT_S = 3.0
 DEFAULT_WRITE_TIMEOUT_S = 3.0
 DEFAULT_OPEN_SETTLE_S = 0.10  # match `capactive_calibration.py`'s "Give device a moment after opening port"
 
-# Trace is enabled if explicitly requested, or automatically when running with unittest verbosity (-v).
-TRACE = (os.environ.get("JUICER_TRACE") == "1") or ("-v" in sys.argv)
+# Always trace: user requested that `python unit_test.py` prints everything without flags.
+TRACE = True
 
 
 def _t(msg: str) -> None:
     """Trace log (stderr)."""
-    if TRACE:
-        print(f"[unit_test][trace] {msg}", file=sys.stderr)
+    print(f"[unit_test][trace] {msg}", file=sys.stderr)
 
 
 def _sleep(seconds: float, reason: str) -> None:
@@ -497,8 +489,18 @@ class TestDoValidationNoActuation(JuicerTestBase):
         self.assertStatusFailure(resp)
 
 
-@unittest.skipUnless(os.environ.get("JUICER_ACTUATE") == "1", "Set JUICER_ACTUATE=1 to enable pump actuation tests")
 class TestActuationSmallVolumes(JuicerTestBase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        # Safety: make it very obvious we're about to move the pump, and give a moment to abort.
+        print(
+            "[unit_test] NOTE: Actuation tests are enabled by default and WILL move the pump briefly.\n"
+            "[unit_test] If this is unexpected, press Ctrl+C now.",
+            file=sys.stderr,
+        )
+        _sleep(3.0, "safety countdown before actuation tests")
+
     def test_reward_increments_counters(self) -> None:
         self.client.do("reset")
         before = self.client.get("reward_mls", "reward_number")
@@ -535,10 +537,6 @@ class TestActuationSmallVolumes(JuicerTestBase):
         self.assertStatusSuccess(resp2)
 
 
-@unittest.skipUnless(
-    os.environ.get("JUICER_TEST_PERSIST") == "1",
-    "Set JUICER_TEST_PERSIST=1 to enable persistence-across-reset tests",
-)
 class TestPersistenceBestEffort(JuicerTestBase):
     def test_direction_persists_across_soft_reset(self) -> None:
         # Save original direction
@@ -564,33 +562,12 @@ def _main() -> None:
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--port", help="Serial port (e.g., /dev/ttyACM0 or COM15). Also via JUICER_PORT.")
     parser.add_argument("--debug", action="store_true", help="Print port discovery debug via JUICER_DEBUG=1.")
-    parser.add_argument(
-        "--actuate",
-        action="store_true",
-        help="Enable pump actuation tests (same as JUICER_ACTUATE=1).",
-    )
-    parser.add_argument(
-        "--persist",
-        action="store_true",
-        help="Enable persistence-across-reset tests (same as JUICER_TEST_PERSIST=1).",
-    )
-    parser.add_argument(
-        "--trace",
-        action="store_true",
-        help="Print commands, responses, and delays (same as JUICER_TRACE=1).",
-    )
     args, remaining = parser.parse_known_args()
 
     if args.port:
         os.environ["JUICER_PORT"] = args.port
     if args.debug:
         os.environ["JUICER_DEBUG"] = "1"
-    if args.actuate:
-        os.environ["JUICER_ACTUATE"] = "1"
-    if args.persist:
-        os.environ["JUICER_TEST_PERSIST"] = "1"
-    if args.trace:
-        os.environ["JUICER_TRACE"] = "1"
 
     # Hand control to unittest, preserving any remaining args like -v / -k patterns.
     unittest.main(argv=[sys.argv[0]] + remaining)
