@@ -46,9 +46,9 @@ from serial.tools import list_ports
 
 
 BAUD = 2_000_000
-DEFAULT_TIMEOUT_S = 2.5
-DEFAULT_WRITE_TIMEOUT_S = 2.0
-DEFAULT_OPEN_SETTLE_S = 0.6  # opening the port can reset the ESP32; give USB CDC time to settle
+DEFAULT_TIMEOUT_S = 3.0
+DEFAULT_WRITE_TIMEOUT_S = 3.0
+DEFAULT_OPEN_SETTLE_S = 0.10  # match `capactive_calibration.py`'s "Give device a moment after opening port"
 
 
 def find_port(preferred: str | None, debug: bool = False) -> str | None:
@@ -94,35 +94,37 @@ class JuicerClient:
     read_timeout_s: float = DEFAULT_TIMEOUT_S
     write_timeout_s: float = DEFAULT_WRITE_TIMEOUT_S
     settle_s: float = DEFAULT_OPEN_SETTLE_S
-    exclusive: bool = True
+    # Keep this False by default; TIOCEXCL doesn't detect an already-open port anyway,
+    # and some setups behave strangely with exclusive locks.
+    exclusive: bool = False
 
     def __post_init__(self) -> None:
         self._ser = self._open_serial()
-        # Mirror the working behavior in `test_connection.py` (some platforms need DTR/RTS asserted).
-        try:
-            self._ser.dtr = True
-            self._ser.rts = True
-        except Exception:
-            # Some backends/OSes may not support setting these; continue.
-            pass
+        # Some platforms need DTR/RTS asserted (mirrors `test_connection.py`).
+        # But unlike the earlier version, we avoid reopening/reset loops.
+        for attr, val in (("dtr", True), ("rts", True)):
+            try:
+                setattr(self._ser, attr, val)
+            except Exception:
+                pass
         self._ser.reset_input_buffer()
         self._ser.reset_output_buffer()
         time.sleep(self.settle_s)
 
     def _open_serial(self) -> serial.Serial:
         """
-        Open the serial port in the same style as `test_connection.py`.
+        Open the serial port in the same style as `capactive_calibration.py` / `api.md` examples.
 
         Important: On some ESP32 USB CDC stacks, opening the port can reset the MCU or briefly stall I/O.
-        Using timeout=0 (non-blocking) matches our working `test_connection.py` approach.
         """
-        # Prefer exclusive access so we fail fast if another process (screen/modemmanager/etc) has the port.
         try:
             return serial.Serial(
                 self.port,
                 self.baud,
-                timeout=0,
+                timeout=self.read_timeout_s,
                 write_timeout=self.write_timeout_s,
+                dsrdtr=True,
+                rtscts=False,
                 exclusive=self.exclusive,
             )
         except TypeError:
@@ -130,28 +132,11 @@ class JuicerClient:
             return serial.Serial(
                 self.port,
                 self.baud,
-                timeout=0,
+                timeout=self.read_timeout_s,
                 write_timeout=self.write_timeout_s,
+                dsrdtr=True,
+                rtscts=False,
             )
-
-    def _reopen(self) -> None:
-        try:
-            self._ser.close()
-        except Exception:
-            pass
-        time.sleep(0.1)
-        self._ser = self._open_serial()
-        try:
-            self._ser.dtr = True
-            self._ser.rts = True
-        except Exception:
-            pass
-        try:
-            self._ser.reset_input_buffer()
-            self._ser.reset_output_buffer()
-        except Exception:
-            pass
-        time.sleep(self.settle_s)
 
     def close(self) -> None:
         try:
@@ -203,33 +188,41 @@ class JuicerClient:
         if not msg.endswith("\n"):
             msg += "\n"
 
-        # Best-effort sync: clear anything pending so we associate response to this request.
+        # Match `capactive_calibration.py`: clear pending input so reply is correlated.
         try:
             self._ser.reset_input_buffer()
         except Exception:
             pass
         data = msg.encode("utf-8")
 
-        # Write retry: the ESP32 can be mid-reset if DTR/RTS toggled elsewhere; a short retry helps.
-        last_exc: Exception | None = None
-        for _attempt in range(3):
-            try:
-                self._ser.write(data)
-                self._ser.flush()
-                return self._readline_json(time.time() + timeout_s)
-            except (serial.SerialTimeoutException, ProtocolError) as e:
-                last_exc = e
-                # If we can't write, the port may be busy or the MCU may have reset.
-                # Reopen + settle matches the working "unplug/replug" recovery behavior.
-                try:
-                    self._reopen()
-                except Exception:
-                    time.sleep(0.25)
-                try:
-                    self._ser.reset_input_buffer()
-                except Exception:
-                    pass
-        raise ProtocolError(f"Request failed after retries: {last_exc!r}")
+        try:
+            self._ser.write(data)
+            # This is exactly what your existing scripts do (`capactive_calibration.py`).
+            # If your setup's flush is safe there, it should be safe here too.
+            self._ser.flush()
+        except serial.SerialTimeoutException as e:
+            raise ProtocolError(
+                "Serial write timed out. This almost always means the port is wedged/busy.\n"
+                "- Close anything that might have /dev/ttyACM0 open (Arduino Serial Monitor, `screen`, etc)\n"
+                "- If on Ubuntu, consider stopping ModemManager: `sudo systemctl stop ModemManager`\n"
+                "- Unplug/replug the ESP32\n"
+                f"Original error: {e!r}"
+            ) from e
+
+        # Read one line and parse, matching the docs/examples.
+        raw = self._ser.readline().decode(errors="replace").strip()
+        if not raw:
+            raise ProtocolError("No response line received from device (timeout).")
+        if not raw.startswith("{"):
+            # Firmware sometimes prints non-JSON noise; treat as protocol error with raw line for debugging.
+            raise ProtocolError(f"Non-JSON response line: {raw!r}")
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise ProtocolError(f"Invalid JSON response: {raw!r}") from e
+        if not isinstance(obj, dict):
+            raise ProtocolError(f"JSON response was not an object: {raw!r}")
+        return obj
 
     def get(self, *keys: str) -> dict[str, Any]:
         return self.request({"get": list(keys)})
@@ -275,24 +268,9 @@ class JuicerTestBase(unittest.TestCase):
             _GLOBAL_CLIENT = JuicerClient(port=port)
             print(f"[unit_test] Using {port}", file=sys.stderr)
 
-            # Quick handshake: prove we can send/receive (allow extra time for USB CDC reset/settle).
-            deadline = time.time() + 12.0
-            last: Exception | None = None
-            while time.time() < deadline:
-                try:
-                    _GLOBAL_CLIENT.get("flow_rate")
-                    last = None
-                    break
-                except Exception as e:
-                    last = e
-                    time.sleep(0.4)
-            if last is not None:
-                raise ProtocolError(
-                    "Unable to communicate with device during handshake. "
-                    "If `python test_connection.py` also fails, check that no other process is using the port "
-                    "(e.g. `screen`, Arduino Serial Monitor, ModemManager) and try unplug/replug.\n"
-                    f"Last error: {last!r}"
-                )
+            # Quick handshake: prove we can send/receive. Fail FAST if we can't write/read.
+            # If this fails, tests can't proceed meaningfully anyway.
+            _GLOBAL_CLIENT.get("flow_rate")
 
         cls.client = _GLOBAL_CLIENT
 
@@ -341,7 +319,10 @@ def _global_cleanup() -> None:
                     restore[k] = _GLOBAL_SAVED_SETTINGS[k]
             if restore:
                 _GLOBAL_CLIENT.set(**restore)
-        _GLOBAL_CLIENT.do("reset")
+        try:
+            _GLOBAL_CLIENT.do("reset")
+        except KeyboardInterrupt:
+            return
     except Exception:
         # Never mask original test failures
         pass
