@@ -63,6 +63,7 @@ Send JSON objects with any combination of `set`, `do`, and `get` fields. Only on
 ### Set commands
 
 - `{"set": {"flow_rate": <float>}}` — set flow rate (must be > 0).
+- `{"set":{"adjust_flow_rate":{"expected_mls":<float>,"actual_mls":<float>}}}` — adjust and persist flow rate based on an expected vs observed dispense (both must be > 0). Uses: `flow_rate_new = flow_rate_old * (actual_mls / expected_mls)`. Response includes `flow_rate_old`, `flow_rate_new`, and `scale_factor`.
 - `{"set": {"purge_vol": <float>}}` — set purge volume (must be > 0).
 - `{"set": {"target_rps": <float>}}` — set target revolutions per second (must be > 0 and <= MAX_RPS).
 - `{"set": {"direction": "<left|right>"}}` — persist pump direction for future runs.

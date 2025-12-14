@@ -402,6 +402,12 @@ void check_serial_commands() {
       bool success = true;
       JsonObject setParams = doc["set"].as<JsonObject>();
 
+      // Reject ambiguous requests: don't allow both direct flow_rate and adjust_flow_rate in the same request.
+      if (setParams.containsKey("flow_rate") && setParams.containsKey("adjust_flow_rate")) {
+        success = false;
+        responseDoc["error"] = "Use either set.flow_rate or set.adjust_flow_rate (not both)";
+      }
+
       if (setParams.containsKey("flow_rate")) {
         float new_flow_rate = setParams["flow_rate"].as<float>();
         if (new_flow_rate > 0) {
@@ -411,6 +417,32 @@ void check_serial_commands() {
         } else {
           success = false;
           responseDoc["error"] = "Invalid flow_rate value";
+        }
+      }
+
+      // Adjust flow_rate based on an expected vs actual dispense measurement.
+      // Matches the scaling in `capactive_calibration.py`:
+      //   flow_rate_new = flow_rate_old * (actual_mls / expected_mls)
+      if (setParams.containsKey("adjust_flow_rate") && success) {
+        JsonObject adj = setParams["adjust_flow_rate"].as<JsonObject>();
+        float expected_mls = adj["expected_mls"].as<float>();
+        float actual_mls = adj["actual_mls"].as<float>();
+
+        if (expected_mls > 0 && actual_mls > 0) {
+          float flow_rate_old = flow_rate;
+          float scale_factor = actual_mls / expected_mls;
+          float flow_rate_new = flow_rate_old * scale_factor;
+
+          flow_rate = flow_rate_new;
+          preferences.putFloat("flow_rate", flow_rate);
+          sched_disp_update = true;
+
+          responseDoc["flow_rate_old"] = flow_rate_old;
+          responseDoc["flow_rate_new"] = flow_rate_new;
+          responseDoc["scale_factor"] = scale_factor;
+        } else {
+          success = false;
+          responseDoc["error"] = "Invalid adjust_flow_rate values (expected_mls and actual_mls must be > 0)";
         }
       }
       

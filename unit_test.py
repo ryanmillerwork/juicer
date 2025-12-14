@@ -459,6 +459,49 @@ class TestSetValidation(JuicerTestBase):
         resp = self.client.set(flow_rate=-1)
         self.assertStatusFailure(resp)
 
+    def test_set_adjust_flow_rate_computes_and_persists(self) -> None:
+        # Read current
+        before = self.client.get("flow_rate")
+        old = float(before["flow_rate"])
+        self.assertGreater(old, 0.0)
+
+        # Use simple ratio so expected math is unambiguous
+        expected_mls = 100.0
+        actual_mls = 50.0
+        scale = actual_mls / expected_mls
+        expected_new = old * scale
+
+        resp = self.client.request(
+            {"set": {"adjust_flow_rate": {"expected_mls": expected_mls, "actual_mls": actual_mls}}}
+        )
+        self.assertStatusSuccess(resp)
+        self.assertIn("flow_rate_old", resp)
+        self.assertIn("flow_rate_new", resp)
+        self.assertIn("scale_factor", resp)
+        self.assertAlmostEqual(float(resp["flow_rate_old"]), old, places=6)
+        self.assertAlmostEqual(float(resp["scale_factor"]), scale, places=6)
+        self.assertAlmostEqual(float(resp["flow_rate_new"]), expected_new, places=6)
+
+        # Verify persisted value via get
+        after = self.client.get("flow_rate")
+        self.assertAlmostEqual(float(after["flow_rate"]), expected_new, places=6)
+
+    def test_set_adjust_flow_rate_rejects_invalid(self) -> None:
+        resp = self.client.request({"set": {"adjust_flow_rate": {"expected_mls": 0, "actual_mls": 10}}})
+        self.assertStatusFailure(resp)
+        resp = self.client.request({"set": {"adjust_flow_rate": {"expected_mls": 10, "actual_mls": 0}}})
+        self.assertStatusFailure(resp)
+        resp = self.client.request({"set": {"adjust_flow_rate": {"expected_mls": -1, "actual_mls": 10}}})
+        self.assertStatusFailure(resp)
+        resp = self.client.request({"set": {"adjust_flow_rate": {"expected_mls": 10, "actual_mls": -1}}})
+        self.assertStatusFailure(resp)
+
+    def test_set_adjust_flow_rate_and_flow_rate_mutually_exclusive(self) -> None:
+        resp = self.client.request(
+            {"set": {"flow_rate": 1.0, "adjust_flow_rate": {"expected_mls": 10, "actual_mls": 10}}}
+        )
+        self.assertStatusFailure(resp)
+
     def test_set_purge_vol_rejects_nonpositive(self) -> None:
         resp = self.client.set(purge_vol=0)
         self.assertStatusFailure(resp)
