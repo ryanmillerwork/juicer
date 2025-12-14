@@ -610,7 +610,31 @@ def _main() -> None:
         os.environ["JUICER_DEBUG"] = "1"
 
     # Hand control to unittest, preserving any remaining args like -v / -k patterns.
-    unittest.main(argv=[sys.argv[0]] + remaining)
+    # Use exit=False so we can print an explicit pass/fail count summary afterward.
+    program = unittest.main(argv=[sys.argv[0]] + remaining, exit=False)
+
+    result = program.result  # unittest.result.TestResult
+    tests_run = getattr(result, "testsRun", 0)
+    n_errors = len(getattr(result, "errors", []) or [])
+    n_failures = len(getattr(result, "failures", []) or [])
+    n_skipped = len(getattr(result, "skipped", []) or [])
+    n_xfail = len(getattr(result, "expectedFailures", []) or [])
+    n_xpass = len(getattr(result, "unexpectedSuccesses", []) or [])
+
+    n_failed_total = n_errors + n_failures + n_xpass
+    n_passed = tests_run - n_failed_total - n_skipped - n_xfail
+    if n_passed < 0:
+        n_passed = 0
+
+    print(
+        "[unit_test] Summary: "
+        f"run={tests_run}, passed={n_passed}, failed={n_failed_total} "
+        f"(failures={n_failures}, errors={n_errors}, xpass={n_xpass}), "
+        f"skipped={n_skipped}, xfail={n_xfail}",
+        file=sys.stderr,
+    )
+
+    raise SystemExit(0 if result.wasSuccessful() else 1)
 
 
 if __name__ == "__main__":
