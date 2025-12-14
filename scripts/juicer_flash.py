@@ -234,22 +234,86 @@ def ensure_arduino_cli_config(cfg_path: str) -> None:
     cfg_file.write_text(txt, encoding="utf-8")
 
 
-def ensure_arduino_cli(arduino_cli: str) -> None:
+def machine_arch() -> str:
+    try:
+        cp = subprocess.run(["uname", "-m"], check=True, text=True, capture_output=True)
+        return (cp.stdout or "").strip()
+    except Exception:
+        return ""
+
+
+def is_armv6(arch: str) -> bool:
+    a = (arch or "").lower()
+    return "armv6" in a
+
+
+def ensure_arduino_cli(arduino_cli: str, *, yes: bool = False) -> str:
+    """
+    Ensure arduino-cli is available and return the path to use.
+
+    On some platforms (notably Linux ARMv6), Arduino does not publish prebuilt
+    arduino-cli releases, so the official install.sh fails. In that case we
+    fall back to apt, and finally to building from source with Go.
+    """
     if os.path.exists(arduino_cli):
-        return
+        return arduino_cli
+
+    existing = which("arduino-cli")
+    if existing:
+        return existing
 
     if which("curl") is None:
         raise SystemExit("curl is required to install arduino-cli. Please install it and re-run.")
 
+    # First attempt: official installer (works on most architectures).
     ensure_dir(os.path.dirname(arduino_cli))
-
     eprint("Installing arduino-cli to ~/.local/bin ...")
-    # Use the official installer; user-local (-b).
-    cmd = f'curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s -- -b "{os.path.dirname(arduino_cli)}"'
-    run(["bash", "-lc", cmd], check=True)
+    cmd = (
+        "curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh"
+        f' | sh -s -- -b "{os.path.dirname(arduino_cli)}"'
+    )
+    try:
+        run(["bash", "-lc", cmd], check=True)
+    except CmdError as ex:
+        arch = machine_arch()
+        if not is_armv6(arch):
+            raise
 
-    if not os.path.exists(arduino_cli):
-        raise SystemExit(f"arduino-cli install did not produce expected binary at {arduino_cli}")
+        # ARMv6 fallback: try distro package first.
+        eprint(f"Note: official arduino-cli installer failed on architecture {arch!r}.")
+        if sudo_available() and confirm("Try installing arduino-cli via apt-get instead?", default_yes=yes):
+            try:
+                apt_install(["arduino-cli"])
+            except CmdError:
+                # We'll try the Go build fallback next.
+                pass
+            existing2 = which("arduino-cli")
+            if existing2:
+                return existing2
+
+        # Last resort: build from source (requires Go).
+        if which("go") is None:
+            if sudo_available() and confirm("Install Go toolchain (golang-go) via apt-get to build arduino-cli?", default_yes=yes):
+                apt_install(["golang-go"])
+            else:
+                raise SystemExit(
+                    "arduino-cli install failed on ARMv6 and Go was not available.\n"
+                    "Install either `arduino-cli` (if available) or `golang-go`, then re-run."
+                ) from ex
+
+        eprint("Building arduino-cli from source (Go) ...")
+        env = dict(os.environ)
+        env["GOBIN"] = os.path.dirname(arduino_cli)
+        run(["go", "install", "github.com/arduino/arduino-cli/cmd/arduino-cli@latest"], check=True, env=env)
+
+    if os.path.exists(arduino_cli):
+        return arduino_cli
+
+    existing3 = which("arduino-cli")
+    if existing3:
+        return existing3
+
+    raise SystemExit("arduino-cli installation did not produce a usable binary (neither at the requested path nor on PATH).")
 
 
 def arduino_env(tmpdir: str) -> dict[str, str]:
@@ -560,7 +624,7 @@ def main() -> None:
     ensure_dialout_membership()
 
     # 3) arduino-cli + core + libs
-    ensure_arduino_cli(args.arduino_cli)
+    args.arduino_cli = ensure_arduino_cli(args.arduino_cli, yes=args.yes)
     ensure_esp32_core(args.arduino_cli, args.core_version, tmpdir=tmpdir)
     ensure_libraries(args.arduino_cli, tmpdir=tmpdir)
 
