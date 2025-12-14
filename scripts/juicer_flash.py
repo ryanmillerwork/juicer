@@ -113,6 +113,32 @@ def run(
         raise CmdError(msg) from ex
 
 
+def detect_repo_dir_fallback() -> str:
+    """
+    If we're being run from inside a git checkout that looks like the juicer repo,
+    prefer that checkout as the default --repo-dir.
+
+    This prevents surprising behavior where running the script from one clone
+    still uses (or clones into) ~/code/juicer due to the historical default.
+    """
+    try:
+        cp = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        top = (cp.stdout or "").strip()
+        if not top:
+            return DEFAULT_REPO_DIR
+        # Heuristic: repo root should contain the firmware sketch directory.
+        if os.path.isdir(os.path.join(top, "juice_pump3")):
+            return top
+    except Exception:
+        pass
+    return DEFAULT_REPO_DIR
+
+
 def prompt(msg: str) -> None:
     input(f"\n{msg}\nPress Enter to continue...")
 
@@ -502,9 +528,11 @@ def upload_build(
 def main() -> None:
     ensure_not_root()
 
+    default_repo_dir = detect_repo_dir_fallback()
+
     ap = argparse.ArgumentParser(description="Set up toolchain and flash Juicer firmware to ESP32-S2/S3.")
     ap.add_argument("--repo-url", default=DEFAULT_REPO_URL, help="Git repo URL to clone/pull.")
-    ap.add_argument("--repo-dir", default=DEFAULT_REPO_DIR, help="Local repo directory.")
+    ap.add_argument("--repo-dir", default=default_repo_dir, help="Local repo directory.")
     ap.add_argument("--arduino-cli", default=DEFAULT_ARDUINO_CLI, help="Path to arduino-cli binary.")
     ap.add_argument("--core-version", default=DEFAULT_CORE_VERSION, help="ESP32 Arduino core version to install.")
     ap.add_argument("--product", default="juicer3", help='USB product string (default: "juicer3").')
