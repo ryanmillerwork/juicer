@@ -9,6 +9,31 @@ Why "unit" tests?
   This file focuses on deterministic protocol + state checks, and gates any pump actuation
   behind an explicit opt-in.
 
+What gets tested (by class):
+- `TestProtocolBasics`
+  - `test_get_flow_rate_round_trip`: `get` returns a numeric `flow_rate` > 0.
+  - `test_unknown_get_key_returns_unknown_parameter`: unknown `get` keys return `"Unknown parameter"`.
+  - `test_invalid_json_reports_invalid_json_format`: malformed JSON yields `{"status":"Invalid JSON format"}`.
+  - `test_do_multiple_ops_rejected`: firmware rejects requests with >1 `do` op in a single object.
+  - `test_do_invalid_type_rejected`: non-string/non-object `do` values are rejected.
+- `TestSetValidation`
+  - `test_set_flow_rate_rejects_nonpositive`: `set.flow_rate` must be > 0.
+  - `test_set_purge_vol_rejects_nonpositive`: `set.purge_vol` must be > 0.
+  - `test_set_target_rps_bounds`: `set.target_rps` must be > 0 and <= MAX_RPS; valid values round-trip via `get`.
+  - `test_set_direction_accepts_left_right`: `set.direction` accepts left/right and rejects other strings.
+- `TestDoValidationNoActuation` (safe: does not start the pump successfully)
+  - `test_do_reset_sets_counters_to_zero`: `do.reset` zeros `reward_number` and `reward_mls`.
+  - `test_do_unknown_action_fails`: unknown string actions fail with an error.
+  - `test_do_reward_rejects_nonpositive`: `do.reward` rejects <= 0.
+  - `test_do_purge_rejects_nonpositive`: `do.purge` rejects <= 0.
+  - `test_do_calibration_rejects_invalid_params`: `do.calibration` rejects non-positive parameters.
+- `TestActuationSmallVolumes` (requires `JUICER_ACTUATE=1`)
+  - `test_reward_increments_counters`: small reward increments counters.
+  - `test_purge_success_and_abort`: starts a small purge and exercises `do.abort`.
+  - `test_calibration_start_and_abort`: starts a short calibration and exercises `do.abort`.
+- `TestPersistenceBestEffort` (requires `JUICER_TEST_PERSIST=1`)
+  - `test_direction_persists_across_soft_reset`: checks that `direction` persists across a best-effort DTR reset.
+
 Requirements:
 - Python 3.10+
 - pyserial (`pip install pyserial`)
@@ -280,6 +305,15 @@ class JuicerTestBase(unittest.TestCase):
                 {"get": ["flow_rate", "purge_vol", "target_rps", "direction", "reward_mls", "reward_number"]}
             )
             cls._saved_settings = _GLOBAL_SAVED_SETTINGS
+            # Print persisted settings up-front for operator confidence/debugging.
+            print(
+                "[unit_test] Persisted settings at start: "
+                f"flow_rate={cls._saved_settings.get('flow_rate')}, "
+                f"purge_vol={cls._saved_settings.get('purge_vol')}, "
+                f"target_rps={cls._saved_settings.get('target_rps')}, "
+                f"direction={cls._saved_settings.get('direction')}",
+                file=sys.stderr,
+            )
 
             # Make reward counters deterministic for the suite.
             cls.client.do("reset")
