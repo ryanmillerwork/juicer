@@ -51,6 +51,7 @@ Environment variables:
 - JUICER_PORT: override serial port (e.g., /dev/ttyACM0 or COM15)
 - JUICER_ACTUATE=1: enable tests that call successful `do.reward`/`do.purge`/`do.calibration`
 - JUICER_TEST_PERSIST=1: enable persistence-across-reset tests (best-effort reset)
+- JUICER_TRACE=1: print commands, responses, and deliberate delays (very verbose; also auto-enabled with `-v`)
 """
 
 from __future__ import annotations
@@ -74,6 +75,23 @@ BAUD = 2_000_000
 DEFAULT_TIMEOUT_S = 3.0
 DEFAULT_WRITE_TIMEOUT_S = 3.0
 DEFAULT_OPEN_SETTLE_S = 0.10  # match `capactive_calibration.py`'s "Give device a moment after opening port"
+
+# Trace is enabled if explicitly requested, or automatically when running with unittest verbosity (-v).
+TRACE = (os.environ.get("JUICER_TRACE") == "1") or ("-v" in sys.argv)
+
+
+def _t(msg: str) -> None:
+    """Trace log (stderr)."""
+    if TRACE:
+        print(f"[unit_test][trace] {msg}", file=sys.stderr)
+
+
+def _sleep(seconds: float, reason: str) -> None:
+    """Sleep with optional trace output."""
+    if seconds <= 0:
+        return
+    _t(f"sleep {seconds:.3f}s ({reason})")
+    time.sleep(seconds)
 
 
 def find_port(preferred: str | None, debug: bool = False) -> str | None:
@@ -134,7 +152,7 @@ class JuicerClient:
                 pass
         self._ser.reset_input_buffer()
         self._ser.reset_output_buffer()
-        time.sleep(self.settle_s)
+        _sleep(self.settle_s, "after opening port / asserting DTR+RTS")
 
     def _open_serial(self) -> serial.Serial:
         """
@@ -221,6 +239,7 @@ class JuicerClient:
         data = msg.encode("utf-8")
 
         try:
+            _t(f">> {msg.rstrip()}")
             self._ser.write(data)
             # This is exactly what your existing scripts do (`capactive_calibration.py`).
             # If your setup's flush is safe there, it should be safe here too.
@@ -236,6 +255,7 @@ class JuicerClient:
 
         # Read one line and parse, matching the docs/examples.
         raw = self._ser.readline().decode(errors="replace").strip()
+        _t(f"<< {raw if raw else '<no response>'}")
         if not raw:
             raise ProtocolError("No response line received from device (timeout).")
         if not raw.startswith("{"):
@@ -268,11 +288,11 @@ class JuicerClient:
         """
         try:
             self._ser.dtr = False
-            time.sleep(0.1)
+            _sleep(0.1, "DTR low (best-effort reset)")
             self._ser.dtr = True
         except Exception:
             pass
-        time.sleep(0.5)
+        _sleep(0.5, "post-reset settle")
 
 
 class JuicerTestBase(unittest.TestCase):
@@ -490,7 +510,7 @@ class TestActuationSmallVolumes(JuicerTestBase):
         self.assertStatusSuccess(resp)
 
         # Give the pump time to finish (depends on flow_rate).
-        time.sleep(0.3)
+        _sleep(0.3, "allow pump to finish small reward")
         after = self.client.get("reward_mls", "reward_number")
         after_n = int(after["reward_number"])
         after_ml = float(after["reward_mls"])
@@ -502,7 +522,7 @@ class TestActuationSmallVolumes(JuicerTestBase):
         # Start a tiny purge then abort quickly to ensure abort path is healthy.
         resp = self.client.do({"purge": 0.05})
         self.assertStatusSuccess(resp)
-        time.sleep(0.1)
+        _sleep(0.1, "let purge start before abort")
         resp2 = self.client.do("abort")
         self.assertStatusSuccess(resp2)
 
@@ -510,7 +530,7 @@ class TestActuationSmallVolumes(JuicerTestBase):
         # 2 short cycles; then abort immediately.
         resp = self.client.do({"calibration": {"n": 2, "on": 100, "off": 100}})
         self.assertStatusSuccess(resp)
-        time.sleep(0.1)
+        _sleep(0.1, "let calibration start before abort")
         resp2 = self.client.do("abort")
         self.assertStatusSuccess(resp2)
 
@@ -531,7 +551,7 @@ class TestPersistenceBestEffort(JuicerTestBase):
 
         # Best-effort reset: may not work on all platforms/boards.
         self.client.soft_reset_best_effort()
-        time.sleep(0.5)
+        _sleep(0.5, "allow device to reboot/reconnect after best-effort reset")
 
         got = self.client.get("direction").get("direction")
         self.assertEqual(got, target)
@@ -554,6 +574,11 @@ def _main() -> None:
         action="store_true",
         help="Enable persistence-across-reset tests (same as JUICER_TEST_PERSIST=1).",
     )
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="Print commands, responses, and delays (same as JUICER_TRACE=1).",
+    )
     args, remaining = parser.parse_known_args()
 
     if args.port:
@@ -564,6 +589,8 @@ def _main() -> None:
         os.environ["JUICER_ACTUATE"] = "1"
     if args.persist:
         os.environ["JUICER_TEST_PERSIST"] = "1"
+    if args.trace:
+        os.environ["JUICER_TRACE"] = "1"
 
     # Hand control to unittest, preserving any remaining args like -v / -k patterns.
     unittest.main(argv=[sys.argv[0]] + remaining)
