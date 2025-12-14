@@ -12,6 +12,7 @@ Why "unit" tests?
 What gets tested (by class):
 - `TestProtocolBasics`
   - `test_get_flow_rate_round_trip`: `get` returns a numeric `flow_rate` > 0.
+  - `test_get_all_api_keys_round_trip`: `get` returns all documented keys with sane types/values.
   - `test_unknown_get_key_returns_unknown_parameter`: unknown `get` keys return `"Unknown parameter"`.
   - `test_invalid_json_reports_invalid_json_format`: malformed JSON yields `{"status":"Invalid JSON format"}`.
   - `test_do_multiple_ops_rejected`: firmware rejects requests with >1 `do` op in a single object.
@@ -390,6 +391,45 @@ class TestProtocolBasics(JuicerTestBase):
         self.assertIn("flow_rate", resp)
         self.assertIsInstance(resp["flow_rate"], (int, float))
         self.assertGreater(resp["flow_rate"], 0)
+
+    def test_get_all_api_keys_round_trip(self) -> None:
+        # All documented "get" keys in `api.md` / `juice_pump3.ino`.
+        keys = [
+            "flow_rate",
+            "purge_vol",
+            "target_rps",
+            "reward_mls",
+            "reward_number",
+            "direction",
+            "juice_level",
+        ]
+        resp = self.client.request({"get": keys})
+
+        for k in keys:
+            self.assertIn(k, resp, f"Missing key {k!r} in response: {resp}")
+
+        self.assertIsInstance(resp["flow_rate"], (int, float))
+        self.assertGreater(float(resp["flow_rate"]), 0.0)
+
+        self.assertIsInstance(resp["purge_vol"], (int, float))
+        self.assertGreater(float(resp["purge_vol"]), 0.0)
+
+        self.assertIsInstance(resp["target_rps"], (int, float))
+        self.assertGreater(float(resp["target_rps"]), 0.0)
+
+        self.assertIsInstance(resp["reward_mls"], (int, float))
+        self.assertGreaterEqual(float(resp["reward_mls"]), 0.0)
+
+        # ArduinoJson may serialize ints as numbers; accept int-like floats too.
+        self.assertIsInstance(resp["reward_number"], (int, float))
+        self.assertEqual(int(resp["reward_number"]), resp["reward_number"])
+        self.assertGreaterEqual(int(resp["reward_number"]), 0)
+
+        self.assertIn(resp["direction"], ("left", "right"))
+
+        # Firmware currently returns ">50mLs" or "<50mLs", but keep this loose to avoid false negatives.
+        self.assertIsInstance(resp["juice_level"], str)
+        self.assertGreater(len(resp["juice_level"]), 0)
 
     def test_unknown_get_key_returns_unknown_parameter(self) -> None:
         resp = self.client.get("definitely_not_a_real_key")
