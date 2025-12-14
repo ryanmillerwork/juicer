@@ -247,7 +247,12 @@ def is_armv6(arch: str) -> bool:
     return "armv6" in a
 
 
-def ensure_arduino_cli(arduino_cli: str, *, yes: bool = False) -> str:
+def ensure_arduino_cli(
+    arduino_cli: str,
+    *,
+    yes: bool = False,
+    allow_source_build: bool = False,
+) -> str:
     """
     Ensure arduino-cli is available and return the path to use.
 
@@ -291,7 +296,15 @@ def ensure_arduino_cli(arduino_cli: str, *, yes: bool = False) -> str:
             if existing2:
                 return existing2
 
-        # Last resort: build from source (requires Go).
+        if not allow_source_build:
+            raise SystemExit(
+                "arduino-cli could not be installed automatically on this ARMv6 machine.\n"
+                "That's OK—this flashing workflow is best run on a more common host (e.g. x86_64),\n"
+                "or you can install arduino-cli manually and re-run.\n"
+                "If you *really* want to attempt a source build here, re-run with: --build-arduino-cli-from-source"
+            ) from ex
+
+        # Last resort (explicit opt-in): build from source (requires Go).
         if which("go") is None:
             if sudo_available() and confirm("Install Go toolchain (golang-go) via apt-get to build arduino-cli?", default_yes=yes):
                 apt_install(["golang-go"])
@@ -304,7 +317,8 @@ def ensure_arduino_cli(arduino_cli: str, *, yes: bool = False) -> str:
         eprint("Building arduino-cli from source (Go) ...")
         env = dict(os.environ)
         env["GOBIN"] = os.path.dirname(arduino_cli)
-        run(["go", "install", "github.com/arduino/arduino-cli/cmd/arduino-cli@latest"], check=True, env=env)
+        # In recent releases, the main package is at the module root.
+        run(["go", "install", "github.com/arduino/arduino-cli@latest"], check=True, env=env)
 
     if os.path.exists(arduino_cli):
         return arduino_cli
@@ -604,6 +618,11 @@ def main() -> None:
     ap.add_argument("--force-rebuild", action="store_true", help="Always rebuild (ignore cache).")
     ap.add_argument("--skip-apt", action="store_true", help="Skip apt dependency install.")
     ap.add_argument("--skip-pull", action="store_true", help="Skip git pull (use existing repo state).")
+    ap.add_argument(
+        "--build-arduino-cli-from-source",
+        action="store_true",
+        help="(Advanced) If arduino-cli can't be installed normally (e.g. ARMv6), try building it from source with Go.",
+    )
     ap.add_argument("--yes", action="store_true", help="Non-interactive: assume yes for prompts where safe.")
     args = ap.parse_args()
 
@@ -624,7 +643,11 @@ def main() -> None:
     ensure_dialout_membership()
 
     # 3) arduino-cli + core + libs
-    args.arduino_cli = ensure_arduino_cli(args.arduino_cli, yes=args.yes)
+    args.arduino_cli = ensure_arduino_cli(
+        args.arduino_cli,
+        yes=args.yes,
+        allow_source_build=args.build_arduino_cli_from_source,
+    )
     ensure_esp32_core(args.arduino_cli, args.core_version, tmpdir=tmpdir)
     ensure_libraries(args.arduino_cli, tmpdir=tmpdir)
 
