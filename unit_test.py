@@ -31,6 +31,7 @@ Environment variables:
 from __future__ import annotations
 
 import argparse
+import atexit
 import glob
 import json
 import os
@@ -93,7 +94,14 @@ class JuicerClient:
     settle_s: float = 0.05
 
     def __post_init__(self) -> None:
-        self._ser = serial.Serial(self.port, self.baud, timeout=0, write_timeout=self.write_timeout_s)
+        # Note: using a small blocking timeout avoids some flaky behavior seen with fully-nonblocking
+        # serial I/O on certain USB serial stacks when the device is resetting/re-enumerating.
+        self._ser = serial.Serial(
+            self.port,
+            self.baud,
+            timeout=self.read_timeout_s,
+            write_timeout=self.write_timeout_s,
+        )
         # Mirror the working behavior in `test_connection.py` (some platforms need DTR/RTS asserted).
         try:
             self._ser.dtr = True
@@ -119,7 +127,9 @@ class JuicerClient:
         buf = b""
         while time.time() < deadline_s:
             # Read at least 1 byte, otherwise empty reads will spin.
-            buf += self._ser.read(self._ser.in_waiting or 1)
+            chunk = self._ser.read(self._ser.in_waiting or 1)
+            if chunk:
+                buf += chunk
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
                 line_s = line.decode(errors="replace").strip()
@@ -155,9 +165,23 @@ class JuicerClient:
 
         # Best-effort sync: clear anything pending so we associate response to this request.
         self._ser.reset_input_buffer()
-        self._ser.write(msg.encode("utf-8"))
-        self._ser.flush()
-        return self._readline_json(time.time() + timeout_s)
+        data = msg.encode("utf-8")
+
+        # Write retry: the ESP32 can be mid-reset if DTR/RTS toggled elsewhere; a short retry helps.
+        last_exc: Exception | None = None
+        for _attempt in range(3):
+            try:
+                self._ser.write(data)
+                self._ser.flush()
+                return self._readline_json(time.time() + timeout_s)
+            except (serial.SerialTimeoutException, ProtocolError) as e:
+                last_exc = e
+                time.sleep(0.25)
+                try:
+                    self._ser.reset_input_buffer()
+                except Exception:
+                    pass
+        raise ProtocolError(f"Request failed after retries: {last_exc!r}")
 
     def get(self, *keys: str) -> dict[str, Any]:
         return self.request({"get": list(keys)})
@@ -191,36 +215,72 @@ class JuicerTestBase(unittest.TestCase):
     client: JuicerClient
     _saved_settings: dict[str, Any]
 
+
+# Global singleton to avoid opening/closing the serial port per TestCase class.
+# Opening/closing can toggle DTR/RTS and reset the ESP32, causing flaky timeouts.
+_GLOBAL_CLIENT: JuicerClient | None = None
+_GLOBAL_SAVED_SETTINGS: dict[str, Any] | None = None
+
+
+def _global_cleanup() -> None:
+    global _GLOBAL_CLIENT, _GLOBAL_SAVED_SETTINGS
+    if _GLOBAL_CLIENT is None:
+        return
+    try:
+        if _GLOBAL_SAVED_SETTINGS:
+            restore: dict[str, Any] = {}
+            for k in ("flow_rate", "purge_vol", "target_rps", "direction"):
+                if k in _GLOBAL_SAVED_SETTINGS:
+                    restore[k] = _GLOBAL_SAVED_SETTINGS[k]
+            if restore:
+                _GLOBAL_CLIENT.set(**restore)
+        _GLOBAL_CLIENT.do("reset")
+    except Exception:
+        # Never mask original test failures
+        pass
+    finally:
+        try:
+            _GLOBAL_CLIENT.close()
+        except Exception:
+            pass
+        _GLOBAL_CLIENT = None
+        _GLOBAL_SAVED_SETTINGS = None
+
+
+atexit.register(_global_cleanup)
+
     @classmethod
     def setUpClass(cls) -> None:
-        port = find_port(os.environ.get("JUICER_PORT"), debug=os.environ.get("JUICER_DEBUG") == "1")
-        if not port:
-            raise unittest.SkipTest("No juicer serial port found (set JUICER_PORT or use --port).")
+        global _GLOBAL_CLIENT, _GLOBAL_SAVED_SETTINGS
 
-        cls.client = JuicerClient(port=port)
+        if _GLOBAL_CLIENT is None:
+            port = find_port(os.environ.get("JUICER_PORT"), debug=os.environ.get("JUICER_DEBUG") == "1")
+            if not port:
+                raise unittest.SkipTest("No juicer serial port found (set JUICER_PORT or use --port).")
 
-        # Snapshot current persisted settings so we can restore on teardown.
-        snap = cls.client.request(
-            {"get": ["flow_rate", "purge_vol", "target_rps", "direction", "reward_mls", "reward_number"]}
-        )
-        cls._saved_settings = snap
+            _GLOBAL_CLIENT = JuicerClient(port=port)
 
-        # Make reward counters deterministic for the suite.
-        cls.client.do("reset")
+            # Quick handshake: prove we can send/receive.
+            _GLOBAL_CLIENT.get("flow_rate")
+
+        cls.client = _GLOBAL_CLIENT
+
+        if _GLOBAL_SAVED_SETTINGS is None:
+            # Snapshot current persisted settings so we can restore at process exit.
+            _GLOBAL_SAVED_SETTINGS = cls.client.request(
+                {"get": ["flow_rate", "purge_vol", "target_rps", "direction", "reward_mls", "reward_number"]}
+            )
+            cls._saved_settings = _GLOBAL_SAVED_SETTINGS
+
+            # Make reward counters deterministic for the suite.
+            cls.client.do("reset")
+        else:
+            cls._saved_settings = _GLOBAL_SAVED_SETTINGS
 
     @classmethod
     def tearDownClass(cls) -> None:
-        try:
-            # Restore settings. (Reward counters are intentionally reset.)
-            restore: dict[str, Any] = {}
-            for k in ("flow_rate", "purge_vol", "target_rps", "direction"):
-                if k in cls._saved_settings:
-                    restore[k] = cls._saved_settings[k]
-            if restore:
-                cls.client.set(**restore)
-            cls.client.do("reset")
-        finally:
-            cls.client.close()
+        # Global cleanup handles restore/close once for the whole suite.
+        return
 
     def assertStatusSuccess(self, resp: dict[str, Any]) -> None:
         self.assertIn("status", resp, f"Expected a status field; got: {resp}")
