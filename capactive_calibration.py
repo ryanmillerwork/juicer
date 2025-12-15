@@ -400,8 +400,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Detect juicer device and query juice_level.")
     p.add_argument("--device", help="Serial device path override.")
     p.add_argument("--db-service", help="libpq service name from ~/.pg_service.conf (or set PGSERVICE).")
-    p.add_argument("--db-name", default="home_automation", help="Database name (defaults to home_automation).")
-    p.add_argument("--db-host", default="ryan-analysis", help="Postgres host (overrides service).")
+    # If you pass --db-service, leave these unset so the service can supply them.
+    p.add_argument("--db-name", default=None, help="Database name (overrides service).")
+    p.add_argument("--db-host", default=None, help="Postgres host (overrides service).")
     p.add_argument("--db-port", type=int, help="Postgres port (overrides service).")
     p.add_argument("--db-user", help="Postgres user override (defaults to PGUSER or system user).")
     p.add_argument("--run", action="store_true", help="Perform a dispensing run and record readings.")
@@ -435,6 +436,13 @@ def main() -> None:
     p.add_argument("--notes", default="", help="Notes for the run.")
     p.add_argument("--mean-run-id", type=int, help="Print mean a3/a4/a5 for this run_id.")
     args = p.parse_args()
+
+    # Preserve historical defaults when not using a service definition.
+    if not args.db_service:
+        if args.db_name is None:
+            args.db_name = "home_automation"
+        if args.db_host is None:
+            args.db_host = "ryan-analysis"
 
     exclusive_actions = sum(
         bool(flag)
