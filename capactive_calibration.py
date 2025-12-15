@@ -2,6 +2,11 @@
 from __future__ import annotations
 import argparse, json, subprocess, time
 from pathlib import Path
+import os
+import configparser
+import sys
+
+DEFAULT_PGSERVICE = "juicer"
 
 def connect_home_automation(
     dbname: str = "home_automation",
@@ -34,6 +39,31 @@ def connect_home_automation(
     if user:
         kwargs["user"] = user
     return psycopg.connect(**kwargs)
+
+def _candidate_service_files() -> list[Path]:
+    """Return libpq pg_service.conf candidate locations (user + system)."""
+    # libpq supports PGSERVICEFILE to point at a specific service file.
+    env_file = os.environ.get("PGSERVICEFILE")
+    if env_file:
+        return [Path(env_file).expanduser()]
+    return [Path.home() / ".pg_service.conf", Path("/etc/pg_service.conf")]
+
+def _service_exists(service: str) -> tuple[bool, list[Path]]:
+    """Return (exists, searched_files) for a libpq service name."""
+    searched: list[Path] = []
+    for f in _candidate_service_files():
+        searched.append(f)
+        try:
+            if not f.exists():
+                continue
+            cp = configparser.ConfigParser()
+            cp.read(f)
+            if service in cp.sections():
+                return True, searched
+        except Exception:
+            # Don't block execution on parse issues; connect() will still try.
+            continue
+    return False, searched
 
 def ensure_tables(conn) -> None:
     """Create juicer_runs and juicer_readings tables if they do not exist."""
@@ -310,6 +340,80 @@ def perform_run(
     conn.commit()
     return run_id
 
+def perform_run_no_db(
+    port: Path,
+    *,
+    nom_vol: int,
+    liquid: str,
+    n_readings: int,
+    period: float,
+    vol_per_period: float,
+    direction: str,
+    notes: str = "",
+) -> None:
+    """Run the pump and print readings, without any database writes."""
+    _ = liquid, notes  # currently unused in no-DB mode
+    try:
+        import serial  # type: ignore
+    except Exception as e:
+        raise RuntimeError(f"pyserial is required for runs: {e}") from e
+
+    try:
+        real_port = str(port.resolve())
+    except OSError:
+        real_port = str(port)
+
+    last_reward_mls = 0.0
+    try:
+        ser = serial.Serial(real_port, baudrate=2_000_000, timeout=3, write_timeout=3)
+    except Exception as e:
+        raise RuntimeError(f"Failed to open serial port {real_port}: {e}") from e
+
+    try:
+        time.sleep(0.1)
+        serial_json_command(ser, {"do": "reset"})
+
+        next_at = time.monotonic()
+        for idx in range(n_readings):
+            payload = {
+                "set": {"direction": direction},
+                "do": {"reward": vol_per_period},
+                "get": ["juice_level", "reward_mls"],
+            }
+            parsed, raw = serial_json_command(ser, payload)
+            if not parsed:
+                raise RuntimeError(f"Pump returned non-JSON: {raw}")
+            if parsed.get("status") == "failure":
+                raise RuntimeError(f"Pump error: {parsed}")
+
+            juice = parsed.get("juice_level") or [None, None, None]
+            a3 = _coerce_float_or_none(juice[0] if len(juice) > 0 else None)
+            a4 = _coerce_float_or_none(juice[1] if len(juice) > 1 else None)
+            a5 = _coerce_float_or_none(juice[2] if len(juice) > 2 else None)
+            reward_mls = float(parsed.get("reward_mls", last_reward_mls))
+            last_reward_mls = reward_mls
+            if (direction or "").lower() == "reverse":
+                mls_remaining = float(nom_vol + reward_mls)
+            else:
+                mls_remaining = float(max(nom_vol - reward_mls, 0))
+
+            if (idx + 1) % 10 == 0 or idx == 0 or idx == n_readings - 1:
+                print(
+                    f"Reading {idx + 1}/{n_readings} -> "
+                    f"a3={a3}, a4={a4}, a5={a5}, "
+                    f"reward_mls={reward_mls}, mls_remaining={mls_remaining}"
+                )
+
+            if period > 0:
+                next_at += period
+                time.sleep(max(0, next_at - time.monotonic()))
+
+        if period > 0:
+            print(f"Waiting {period:.1f}s for final pump operation to complete...")
+            time.sleep(period + 0.5)
+    finally:
+        ser.close()
+
 CMD = '{"get": ["juice_level"]}\\n'
 
 def find_usb(keyword="juicer") -> list[str]:
@@ -437,6 +541,10 @@ def main() -> None:
     p.add_argument("--mean-run-id", type=int, help="Print mean a3/a4/a5 for this run_id.")
     args = p.parse_args()
 
+    # Default to a libpq service unless the user explicitly overrides host/dbname.
+    if args.db_service is None and args.db_host is None and args.db_name is None and args.db_port is None:
+        args.db_service = os.environ.get("PGSERVICE") or DEFAULT_PGSERVICE
+
     # Preserve historical defaults when not using a service definition.
     if not args.db_service:
         if args.db_name is None:
@@ -454,6 +562,14 @@ def main() -> None:
 
     conn = None
     try:
+        if args.db_service:
+            ok, searched = _service_exists(args.db_service)
+            if not ok:
+                searched_s = ", ".join(str(p) for p in searched)
+                print(
+                    f"Reminder: pg_service '{args.db_service}' not found in {searched_s}. "
+                    "Create a matching entry (see pg_service.example.conf) or pass --db-host/--db-name."
+                )
         conn = connect_home_automation(
             dbname=args.db_name,
             host=args.db_host,
@@ -589,24 +705,41 @@ def main() -> None:
         return
 
     if args.run:
-        if not conn:
-            print("Cannot run: database not connected.")
-            return
         if args.nom_vol is None or args.vol_per_period <= 0:
             print("nom-vol and vol-per-period are required (>0) when using --run.")
             return
-        run_id = perform_run(
-            conn,
-            device,
-            nom_vol=args.nom_vol,
-            liquid=args.liquid,
-            n_readings=args.n_readings,
-            period=args.period,
-            vol_per_period=args.vol_per_period,
-            direction=args.direction,
-            notes=args.notes,
-        )
-        print(f"Run {run_id} complete.")
+        if conn:
+            run_id = perform_run(
+                conn,
+                device,
+                nom_vol=args.nom_vol,
+                liquid=args.liquid,
+                n_readings=args.n_readings,
+                period=args.period,
+                vol_per_period=args.vol_per_period,
+                direction=args.direction,
+                notes=args.notes,
+            )
+            print(f"Run {run_id} complete.")
+        else:
+            if not sys.stdin.isatty():
+                print("Cannot run: database not connected (non-interactive; refusing to prompt).")
+                return
+            ans = input("Database not connected. Continue anyway (no DB writes)? [y/N] ").strip().lower()
+            if ans not in {"y", "yes"}:
+                print("Aborted (database not connected).")
+                return
+            print("Continuing in no-DB mode (no readings will be recorded).")
+            perform_run_no_db(
+                device,
+                nom_vol=args.nom_vol,
+                liquid=args.liquid,
+                n_readings=args.n_readings,
+                period=args.period,
+                vol_per_period=args.vol_per_period,
+                direction=args.direction,
+                notes=args.notes,
+            )
     else:
         print(f"Sending {CMD.strip()} ...")
         print("Response:", send_command(device))
