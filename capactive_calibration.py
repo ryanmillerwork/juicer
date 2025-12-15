@@ -456,7 +456,7 @@ def _real_port(port: Path) -> str:
 
 
 def calibrate_flow_rate(port: Path, expected_mls: float, actual_mls: float) -> None:
-    """Adjust the pump's flow_rate so exp/act equals the scaling factor."""
+    """Ask firmware to adjust & persist flow_rate based on expected vs actual mL."""
     try:
         import serial  # type: ignore
     except Exception as e:
@@ -470,29 +470,34 @@ def calibrate_flow_rate(port: Path, expected_mls: float, actual_mls: float) -> N
     try:
         real_port = _real_port(port)
         with serial.Serial(real_port, baudrate=2_000_000, timeout=3, write_timeout=3) as ser:
-            parsed, raw = serial_json_command(ser, {"get": ["flow_rate"]})
-            if not parsed or "flow_rate" not in parsed:
-                print(f"Failed to read current flow_rate (response: {raw})")
-                return
-            current_flow = float(parsed["flow_rate"])
-
-            target_flow = current_flow * (actual_mls / expected_mls)
-
-            parsed, raw = serial_json_command(ser, {"set": {"flow_rate": target_flow}})
+            # Delegate the math & persistence to the firmware:
+            #   {"set":{"adjust_flow_rate":{"expected_mls":X,"actual_mls":Y}}}
+            parsed, raw = serial_json_command(
+                ser,
+                {"set": {"adjust_flow_rate": {"expected_mls": float(expected_mls), "actual_mls": float(actual_mls)}}},
+            )
             if not parsed:
-                print(f"Failed to set flow_rate (response: {raw})")
+                print(f"Failed to adjust flow_rate (response: {raw})")
                 return
             status = parsed.get("status", "unknown")
             if status != "success":
-                print(f"Setting flow_rate failed ({status}); response: {raw}")
+                print(f"Adjusting flow_rate failed ({status}); response: {raw}")
                 return
 
+            # Firmware returns flow_rate_old/new and scale_factor.
+            fr_old = parsed.get("flow_rate_old")
+            fr_new = parsed.get("flow_rate_new")
+            scale = parsed.get("scale_factor")
+
+            # Also read back persisted value for confirmation.
+            after, raw2 = serial_json_command(ser, {"get": ["flow_rate"]})
+            persisted = after.get("flow_rate") if after else None
+
             print(
-                "Flow calibration complete:"
-                f" current={current_flow:.4f} mL/s,"
-                f" expected={expected_mls} mL,"
-                f" actual={actual_mls} mL,"
-                f" new={target_flow:.4f} mL/s"
+                "Flow calibration complete (firmware-adjusted): "
+                f"expected={expected_mls} mL, actual={actual_mls} mL, "
+                f"scale_factor={scale}, flow_rate_old={fr_old}, flow_rate_new={fr_new}, "
+                f"persisted_flow_rate={persisted}"
             )
     except Exception as exc:
         msg = f"serial error during flow calibration: {exc}"
