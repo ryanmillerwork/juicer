@@ -280,6 +280,19 @@ def ensure_arduino_cli(
     try:
         run(["bash", "-lc", cmd], check=True)
     except CmdError as ex:
+        # The upstream install.sh has historically been fragile across
+        # distros/architectures (notably Raspberry Pi OS ARM64). Prefer a
+        # distro package fallback whenever possible before giving up.
+        if sudo_available() and confirm("arduino-cli installer failed. Try installing arduino-cli via apt-get instead?", default_yes=yes):
+            try:
+                apt_install(["arduino-cli"])
+            except CmdError:
+                # If apt also fails, continue to architecture-specific fallbacks below.
+                pass
+            existing2 = which("arduino-cli")
+            if existing2:
+                return existing2
+
         arch = machine_arch()
         if not is_armv6(arch):
             raise
@@ -292,9 +305,9 @@ def ensure_arduino_cli(
             except CmdError:
                 # We'll try the Go build fallback next.
                 pass
-            existing2 = which("arduino-cli")
-            if existing2:
-                return existing2
+            existing3 = which("arduino-cli")
+            if existing3:
+                return existing3
 
         if not allow_source_build:
             raise SystemExit(
@@ -323,9 +336,9 @@ def ensure_arduino_cli(
     if os.path.exists(arduino_cli):
         return arduino_cli
 
-    existing3 = which("arduino-cli")
-    if existing3:
-        return existing3
+    existing4 = which("arduino-cli")
+    if existing4:
+        return existing4
 
     raise SystemExit("arduino-cli installation did not produce a usable binary (neither at the requested path nor on PATH).")
 
