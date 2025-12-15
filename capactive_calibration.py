@@ -6,20 +6,34 @@ from pathlib import Path
 def connect_home_automation(
     dbname: str = "home_automation",
     host: str = "ryan-analysis",
+    port: int | None = None,
     user: str | None = None,
+    service: str | None = None,
 ):
     """Return a psycopg connection to the Postgres 17 home_automation db.
 
-    Auth details are read from the environment (e.g., PGUSER/PGPASSWORD) or
-    a ~/.pg_service.conf entry matching the host/db. Adjust parameters as
-    needed for other deployments.
+    Auth details are read from libpq sources (environment, ~/.pgpass, etc.).
+    If you have a `~/.pg_service.conf` entry, pass its name via `service=...`
+    (or set the `PGSERVICE` env var) so libpq can load host/port/db defaults.
     """
     try:
         import psycopg
     except Exception as e:  # pragma: no cover - convenience for missing dep
         raise RuntimeError("psycopg is required to connect to Postgres") from e
 
-    return psycopg.connect(dbname=dbname, host=host, user=user)
+    # Explicit kwargs override values coming from the service definition.
+    kwargs: dict = {}
+    if service:
+        kwargs["service"] = service
+    if dbname:
+        kwargs["dbname"] = dbname
+    if host:
+        kwargs["host"] = host
+    if port is not None:
+        kwargs["port"] = port
+    if user:
+        kwargs["user"] = user
+    return psycopg.connect(**kwargs)
 
 def ensure_tables(conn) -> None:
     """Create juicer_runs and juicer_readings tables if they do not exist."""
@@ -385,6 +399,10 @@ def calibrate_flow_rate(port: Path, expected_mls: float, actual_mls: float) -> N
 def main() -> None:
     p = argparse.ArgumentParser(description="Detect juicer device and query juice_level.")
     p.add_argument("--device", help="Serial device path override.")
+    p.add_argument("--db-service", help="libpq service name from ~/.pg_service.conf (or set PGSERVICE).")
+    p.add_argument("--db-name", default="home_automation", help="Database name (defaults to home_automation).")
+    p.add_argument("--db-host", default="ryan-analysis", help="Postgres host (overrides service).")
+    p.add_argument("--db-port", type=int, help="Postgres port (overrides service).")
     p.add_argument("--db-user", help="Postgres user override (defaults to PGUSER or system user).")
     p.add_argument("--run", action="store_true", help="Perform a dispensing run and record readings.")
     p.add_argument("--cue", action="store_true", help="Queue a run in the database without executing it.")
@@ -428,11 +446,24 @@ def main() -> None:
 
     conn = None
     try:
-        conn = connect_home_automation(user=args.db_user)
+        conn = connect_home_automation(
+            dbname=args.db_name,
+            host=args.db_host,
+            port=args.db_port,
+            user=args.db_user,
+            service=args.db_service,
+        )
         ensure_tables(conn)
-        print(f"DB connection OK (home_automation on ryan-analysis as {conn.info.user}).")
+        info = conn.info
+        print(
+            "DB connection OK "
+            f"(dbname={getattr(info, 'dbname', '?')}, "
+            f"host={getattr(info, 'host', '?')}, "
+            f"port={getattr(info, 'port', '?')}, "
+            f"user={getattr(info, 'user', '?')})."
+        )
     except Exception as e:
-        print(f"DB connect failed (home_automation on ryan-analysis): {e}")
+        print(f"DB connect failed: {e}")
         conn = None
 
     if conn and args.mean_run_id is not None:

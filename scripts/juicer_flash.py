@@ -772,6 +772,37 @@ def upload_build(
     *,
     tmpdir: str,
 ) -> None:
+    # Preflight port permissions; if we can't open the device, arduino-cli/esptool
+    # will emit a noisy stack of errors. Give a clearer hint up front.
+    try:
+        if not os.path.exists(port):
+            raise SystemExit(f"Serial port not found: {port}")
+        if not os.access(port, os.R_OK | os.W_OK):
+            user = getpass.getuser()
+            # Suggest the actual owning group of the device node (commonly dialout,
+            # but can be plugdev on some Raspberry Pi OS / udev setups).
+            group_name = None
+            try:
+                import grp
+
+                st = os.stat(port)
+                group_name = grp.getgrgid(st.st_gid).gr_name
+            except Exception:
+                group_name = None
+            raise SystemExit(
+                f"Permission denied opening {port} as user {user!r}.\n\n"
+                "Fix:\n"
+                f"- Add the user to the device-owning group{f' ({group_name})' if group_name else ''}:\n"
+                f"    sudo usermod -aG {group_name or 'dialout'} {user}\n"
+                "  Then log out/in (or reboot) and re-run.\n"
+                "- If you just added the group, your *current session* won't have it yet.\n"
+                "- Note: if `ls -l` shows a trailing '+', ACLs may apply; inspect with:\n"
+                f"    getfacl {port}\n"
+            )
+    except OSError:
+        # If access checks are unreliable for some reason, continue and let arduino-cli report.
+        pass
+
     env = arduino_env(tmpdir)
     run(
         arduino_cli_cmd(
