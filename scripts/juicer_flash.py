@@ -169,7 +169,24 @@ def apt_install(packages: list[str]) -> None:
         raise SystemExit("sudo is required to install apt dependencies, but was not found.")
     # Don't capture output here: sudo may need to prompt for a password, and
     # capturing output can prevent it from using the controlling TTY.
-    run(["sudo", "-v"], check=True)
+    try:
+        run(["sudo", "-v"], check=True)
+    except CmdError as ex:
+        # Common on Raspberry Pi OS when using a throwaway user that isn't in sudoers.
+        msg = str(ex)
+        if "may not run sudo" in msg.lower() or "not in the sudoers file" in msg.lower():
+            user = getpass.getuser()
+            raise SystemExit(
+                f"User {user!r} cannot run sudo on this system.\n\n"
+                "To continue, do ONE of the following:\n"
+                f"- (Recommended) As an admin user, install deps once globally:\n"
+                f"    sudo apt-get update && sudo apt-get install -y {' '.join(packages)}\n"
+                "  Then re-run this script with --skip-apt.\n"
+                f"- Or grant this user sudo (less isolated):\n"
+                f"    sudo usermod -aG sudo {user}\n"
+                "  Then log out/in and re-run.\n"
+            ) from None
+        raise
     run(["sudo", "apt-get", "update"], check=True)
     run(["sudo", "apt-get", "install", "-y", *packages], check=True)
 
@@ -200,7 +217,18 @@ def ensure_dialout_membership() -> None:
 
     user = getpass.getuser()
     eprint(f"Adding user {user!r} to dialout group (required for /dev/ttyACM* access).")
-    run(["sudo", "usermod", "-a", "-G", "dialout", user], check=True)
+    try:
+        run(["sudo", "usermod", "-a", "-G", "dialout", user], check=True)
+    except CmdError as ex:
+        msg = str(ex)
+        if "may not run sudo" in msg.lower() or "not in the sudoers file" in msg.lower():
+            raise SystemExit(
+                f"User {user!r} cannot run sudo on this system, so this script can't add you to the 'dialout' group.\n\n"
+                "Fix (run as an admin user):\n"
+                f"  sudo usermod -aG dialout {user}\n"
+                "Then log out/in (or reboot) and re-run this script.\n"
+            ) from None
+        raise
     raise SystemExit(
         "Added you to dialout. Please log out and log back in (or reboot), then re-run this script."
     )
@@ -249,11 +277,94 @@ def is_armv6(arch: str) -> bool:
     return "armv6" in a
 
 
+def arduino_cli_asset_suffix_for_arch(arch: str) -> str | None:
+    """
+    Map uname -m to Arduino CLI release asset suffix.
+
+    Release assets are typically named like:
+    - arduino-cli_<version>_Linux_64bit.tar.gz
+    - arduino-cli_<version>_Linux_ARM64.tar.gz
+    - arduino-cli_<version>_Linux_ARMv7.tar.gz
+    """
+    a = (arch or "").lower().strip()
+    if a in ("x86_64", "amd64"):
+        return "Linux_64bit.tar.gz"
+    if a in ("aarch64", "arm64"):
+        return "Linux_ARM64.tar.gz"
+    if a in ("armv7l", "armv7"):
+        return "Linux_ARMv7.tar.gz"
+    # ARMv6 and unknown arch: no reliable official prebuilt.
+    return None
+
+
+def install_arduino_cli_from_github_release(
+    arduino_cli: str,
+    *,
+    tmpdir: str,
+) -> str | None:
+    """
+    Attempt to install arduino-cli by downloading the official release asset from GitHub.
+
+    This avoids the Arduino install.sh script, which has been observed to fail on some
+    environments (e.g. Raspberry Pi OS / Debian testing).
+    Returns the installed binary path, or None if no suitable asset was found.
+    """
+    arch = machine_arch()
+    suffix = arduino_cli_asset_suffix_for_arch(arch)
+    if not suffix:
+        return None
+    if which("tar") is None or which("curl") is None:
+        return None
+
+    api = "https://api.github.com/repos/arduino/arduino-cli/releases/latest"
+    cp = run(
+        ["curl", "-fsSL", "-H", "Accept: application/vnd.github+json", "-H", "User-Agent: juicer_flash.py", api],
+        check=True,
+        capture=True,
+    )
+    data = json.loads(cp.stdout or "{}")
+    assets = data.get("assets", []) or []
+    url: str | None = None
+    for a in assets:
+        name = str(a.get("name") or "")
+        if name.endswith(suffix):
+            url = str(a.get("browser_download_url") or "")
+            break
+    if not url:
+        return None
+
+    dl_dir = pathlib.Path(tmpdir) / "arduino-cli-dl"
+    dl_dir.mkdir(parents=True, exist_ok=True)
+    archive = dl_dir / "arduino-cli.tar.gz"
+    extract_dir = dl_dir / "extract"
+    if extract_dir.exists():
+        shutil.rmtree(extract_dir)
+    extract_dir.mkdir(parents=True, exist_ok=True)
+
+    eprint(f"Downloading arduino-cli release asset for {arch!r} ...")
+    run(["curl", "-fL", url, "-o", str(archive)], check=True)
+    run(["tar", "-xzf", str(archive), "-C", str(extract_dir)], check=True)
+
+    # Tarball usually contains a single 'arduino-cli' binary at the root.
+    candidates = list(extract_dir.rglob("arduino-cli"))
+    if not candidates:
+        return None
+
+    src = candidates[0]
+    dest_dir = pathlib.Path(os.path.dirname(arduino_cli))
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = pathlib.Path(arduino_cli)
+    shutil.copy2(src, dest)
+    dest.chmod(0o755)
+    return str(dest)
+
+
 def ensure_arduino_cli(
     arduino_cli: str,
     *,
     yes: bool = False,
     allow_source_build: bool = False,
+    tmpdir: str | None = None,
 ) -> str:
     """
     Ensure arduino-cli is available and return the path to use.
@@ -294,6 +405,16 @@ def ensure_arduino_cli(
             existing2 = which("arduino-cli")
             if existing2:
                 return existing2
+
+        # Next attempt: bypass install.sh and install from GitHub releases (user-local).
+        if tmpdir:
+            try:
+                installed = install_arduino_cli_from_github_release(arduino_cli, tmpdir=tmpdir)
+                if installed and os.path.exists(installed):
+                    return installed
+            except Exception:
+                # Fall through to architecture-specific logic / error reporting.
+                pass
 
         arch = machine_arch()
         if not is_armv6(arch):
@@ -662,6 +783,7 @@ def main() -> None:
         args.arduino_cli,
         yes=args.yes,
         allow_source_build=args.build_arduino_cli_from_source,
+        tmpdir=tmpdir,
     )
     ensure_esp32_core(args.arduino_cli, args.core_version, tmpdir=tmpdir)
     ensure_libraries(args.arduino_cli, tmpdir=tmpdir)
