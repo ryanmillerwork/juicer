@@ -42,6 +42,8 @@ DEFAULT_ARDUINO_CFG = os.path.expanduser("~/.arduino15/arduino-cli.yaml")
 
 DEFAULT_CORE = "esp32:esp32"
 DEFAULT_CORE_VERSION = "3.1.1"
+DEFAULT_NETWORK_TIMEOUT = "600s"
+DEFAULT_RETRIES = 3
 
 # Known boards we care about.
 FQBN_S3 = "esp32:esp32:adafruit_feather_esp32s3_reversetft"
@@ -476,11 +478,55 @@ def arduino_cli_cmd(arduino_cli: str, *args: str) -> list[str]:
     return [arduino_cli, *args]
 
 
+def run_with_retries(
+    args: list[str],
+    *,
+    tries: int,
+    sleep_s: float = 2.0,
+    env: dict[str, str] | None = None,
+    cwd: str | None = None,
+) -> None:
+    """
+    Run a command, retrying a few times for flaky network/registry downloads.
+    Intended for Arduino CLI core/lib downloads on slow connections.
+    """
+    last: CmdError | None = None
+    for i in range(tries):
+        try:
+            run(args, check=True, capture=False, env=env, cwd=cwd)
+            return
+        except CmdError as ex:
+            last = ex
+            if i == tries - 1:
+                raise
+            delay = sleep_s * (2**i)
+            eprint(f"Command failed (attempt {i+1}/{tries}); retrying in {delay:.1f}s ...")
+            time.sleep(delay)
+    if last:
+        raise last
+
+
 def ensure_esp32_core(arduino_cli: str, core_version: str, *, tmpdir: str) -> None:
     ensure_arduino_cli_config(DEFAULT_ARDUINO_CFG)
     env = arduino_env(tmpdir)
-    run(arduino_cli_cmd(arduino_cli, "core", "update-index"), env=env, check=True)
-    run(arduino_cli_cmd(arduino_cli, "core", "install", f"{DEFAULT_CORE}@{core_version}"), env=env, check=True)
+    # Increase network timeout to make large downloads more reliable on slower links
+    # (e.g. Raspberry Pi OS over Wi-Fi).
+    try:
+        run(arduino_cli_cmd(arduino_cli, "config", "set", "network.connection_timeout", DEFAULT_NETWORK_TIMEOUT), env=env, check=True)
+    except CmdError:
+        # Older Arduino CLI versions might not support this setting; continue anyway.
+        pass
+
+    run_with_retries(
+        arduino_cli_cmd(arduino_cli, "core", "update-index"),
+        env=env,
+        tries=DEFAULT_RETRIES,
+    )
+    run_with_retries(
+        arduino_cli_cmd(arduino_cli, "core", "install", f"{DEFAULT_CORE}@{core_version}"),
+        env=env,
+        tries=DEFAULT_RETRIES,
+    )
 
 
 def try_install_lib(arduino_cli: str, name: str, version: str, *, tmpdir: str) -> None:
@@ -499,7 +545,11 @@ def try_install_lib(arduino_cli: str, name: str, version: str, *, tmpdir: str) -
 
     # Fall back to unpinned.
     eprint(f"Warning: could not install {pinned!r} (will try unpinned).")
-    run(arduino_cli_cmd(arduino_cli, "lib", "install", name), env=env, check=True)
+    run_with_retries(
+        arduino_cli_cmd(arduino_cli, "lib", "install", name),
+        env=env,
+        tries=DEFAULT_RETRIES,
+    )
 
 
 def ensure_libraries(arduino_cli: str, *, tmpdir: str) -> None:
