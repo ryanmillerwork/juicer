@@ -167,7 +167,9 @@ def sudo_available() -> bool:
 def apt_install(packages: list[str]) -> None:
     if not sudo_available():
         raise SystemExit("sudo is required to install apt dependencies, but was not found.")
-    run(["sudo", "-v"], check=True, capture=True)
+    # Don't capture output here: sudo may need to prompt for a password, and
+    # capturing output can prevent it from using the controlling TTY.
+    run(["sudo", "-v"], check=True)
     run(["sudo", "apt-get", "update"], check=True)
     run(["sudo", "apt-get", "install", "-y", *packages], check=True)
 
