@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "juicer-scripts"
+version = "0.1.0"
+description = "Host-side scripts for talking to the Juicer ESP32 pump over USB serial."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "pyserial>=3.5",
+]
+
+[project.scripts]
+juicer-test-connection = "test_connection:main"
+juicer-unit-test = "unit_test:_main"
+
+[tool.setuptools]
+# Keep this intentionally minimal: only the serial-test scripts are installable/importable.
+py-modules = ["test_connection", "unit_test"]
+
+

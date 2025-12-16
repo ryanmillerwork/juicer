@@ -12,6 +12,22 @@ Precise USB-controlled fluid reward dispenser for behavioral experiments. Built 
 - `juice_pump3/` — firmware source (ESP32).
 - `firmware.md` — build/upload/calibration notes.
 
+## Python setup (recommended)
+These scripts require **Python 3.10+** and **pyserial**.
+
+From the repo root:
+
+```bash
+python3 -m pip install -e .
+```
+
+Then run either:
+
+```bash
+juicer-test-connection
+juicer-unit-test
+```
+
 ## Firmware compile + upload (Debian, interactive)
 This repo includes an interactive helper that can install the full toolchain (user-local), patch the ESP32 core so the device enumerates as **`juicer3`**, pull the latest `main`, compile (with caching), and upload.
 
