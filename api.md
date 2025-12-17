@@ -62,11 +62,27 @@ Send JSON objects with any combination of `set`, `do`, and `get` fields. Only on
 
 ### Set commands
 
-- `{"set": {"flow_rate": <float>}}` — set flow rate (must be > 0).
+- `{"set": {"flow_rate": <float>}}` — set **calibrated flow rate** (must be > 0). This is **not** a pump speed command; it tells the microcontroller how fast the pump *actually dispenses* (given your pump, tubing, configuration, etc.) so it can convert requested volumes into run time.
 - `{"set":{"adjust_flow_rate":{"expected_mls":<float>,"actual_mls":<float>}}}` — adjust and persist flow rate based on an expected vs observed dispense (both must be > 0). Uses: `flow_rate_new = flow_rate_old * (actual_mls / expected_mls)`. Response includes `flow_rate_old`, `flow_rate_new`, and `scale_factor`.
 - `{"set": {"purge_vol": <float>}}` — set purge volume (must be > 0).
-- `{"set": {"target_rps": <float>}}` — set target revolutions per second (must be > 0 and <= MAX_RPS).
+- `{"set": {"target_rps": <float>}}` — set the pump motor **step rate** as a target revolutions-per-second (must be > 0 and <= MAX_RPS). This is the parameter that most directly corresponds to “how fast the pump runs”.
 - `{"set": {"direction": "<left|right>"}}` — persist pump direction for future runs.
+
+#### Notes on `flow_rate`
+
+- `flow_rate` is a **calibration constant** used to dispense accurate volumes.
+- The firmware uses it to compute an approximate run duration for volume-based commands like `do.reward` and `do.purge`:
+  - \(seconds \approx requested\_mLs / flow\_rate\)
+- If you change tubing length/diameter, fittings, fluid viscosity, or other parts of the plumbing, you should expect `flow_rate` to change. Prefer using `set.adjust_flow_rate` after measuring a dispense.
+
+#### Notes on `target_rps`
+
+- `target_rps` controls the **commanded motor speed** (it sets the step pulse frequency internally). It does **not** guarantee the pump is actually spinning at that exact speed under load.
+- **Default**: `3.0` RPS if no value has been stored previously.
+- **Range**: the firmware enforces \(0 < target\_rps \le 8\) (`MAX_RPS`). The source code notes that practical max is often **~3–4 RPS** depending on the pump/load.
+- Changing `target_rps` will generally change the real dispense rate, so you should **re-calibrate `flow_rate`** (prefer `set.adjust_flow_rate`) after changing `target_rps`.
+- **Persistence note**: in the current firmware, `set.target_rps` takes effect immediately but is **not persisted to flash** (it will revert to the stored/default value on reboot).
+- **Motor driver current limit (hardware)**: if you push to higher RPS, you may also need to increase the motor driver’s current limit using the small trim screw/potentiometer on the driver board. Do this at your own risk: higher current means **more heat** (driver + motor). Make **very small turns**—tiny adjustments can make a big difference—and set the current **only as high as needed** to reliably turn the peristaltic pump without skipping/stalling.
 
 ### Do commands (only one per request)
 
