@@ -9,8 +9,10 @@ Precise USB-controlled fluid reward dispenser for behavioral experiments. Built 
 ## Files of interest
 - `api.md` — serial API reference and CLI examples (Linux one-liners).
 - `test_connection.py` — cross-platform port discovery + `flow_rate` sanity check.
+- `unit_test.py` — integration-style protocol/state tests over serial (some tests actuate the pump briefly).
+- `update_juicer_firmware.py` — Debian-focused interactive toolchain setup + compile + firmware upload helper.
 - `juice_pump3/` — firmware source (ESP32).
-- `firmware.md` — build/upload/calibration notes.
+- `docs/assembly/README.md` — hardware assembly guide (with photos).
 
 ## Python setup (recommended)
 These scripts require **Python 3.10+** and **pyserial**.
@@ -35,7 +37,7 @@ This repo includes an interactive helper that can install the full toolchain (us
 Run from the repo root:
 
 ```bash
-python3 scripts/juicer_flash.py
+python3 update_juicer_firmware.py
 ```
 
 Notes:
