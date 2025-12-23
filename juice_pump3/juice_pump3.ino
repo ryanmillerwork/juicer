@@ -54,6 +54,13 @@ uint32_t pump_stop_time = 0;      // What time to stop the pump
 bool sched_disp_update = false;   // For when you want to update the display but not quite yet
 bool serialConnected = false;
 
+// What to do if a serial reward arrives while a serial reward is already in progress.
+// - replace: stop/shorten current reward and start requested
+// - append: extend current reward by requested amount
+// - reject: reject new reward while reward is running
+enum RewardOverlapPolicy { ROP_REPLACE = 0, ROP_APPEND = 1, ROP_REJECT = 2 };
+RewardOverlapPolicy reward_overlap_policy = ROP_REPLACE;
+
 // Digital juice level monitoring variables
 String juice_level = "<50mLs";  // Current juice level status
 unsigned long last_juice_check_time = 0;  // For 5-second checks
@@ -172,6 +179,21 @@ String direction_to_string(PumpDirection dir) {
   return dir == DIR_RIGHT ? "right" : "left";
 }
 
+String reward_overlap_policy_to_string(RewardOverlapPolicy p) {
+  if (p == ROP_APPEND) return "append";
+  if (p == ROP_REJECT) return "reject";
+  return "replace";
+}
+
+bool parse_reward_overlap_policy(const String& s, RewardOverlapPolicy& out) {
+  String v = s;
+  v.toLowerCase();
+  if (v == "replace") { out = ROP_REPLACE; return true; }
+  if (v == "append") { out = ROP_APPEND; return true; }
+  if (v == "reject") { out = ROP_REJECT; return true; }
+  return false;
+}
+
 
 void writeTextToScreen(int x, int y, uint16_t color, String text) {
   tft.setCursor(x, y);
@@ -229,11 +251,14 @@ void reset_counters(bool refresh_display = true) {
   if (refresh_display) update_display();
 }
 
-void handle_reward(float reward_value, uint32_t color) {
-  if (serial_watering) {
-    reward_mls -= serial_vol; 
-    reward_mls += ((millis() - water_start_time) / 1000.0) * flow_rate;
-  }
+// If a serial reward is currently running, reconcile counters so reward_mls reflects what was actually dispensed so far.
+// This allows us to "replace" (preempt) a running reward without over-counting.
+void reconcile_running_serial_reward() {
+  reward_mls -= serial_vol;
+  reward_mls += ((millis() - water_start_time) / 1000.0) * flow_rate;
+}
+
+void start_serial_reward(float reward_value, uint32_t color) {
   serial_vol = reward_value;
   serial_watering = true;
   water_start_time = millis();
@@ -242,6 +267,30 @@ void handle_reward(float reward_value, uint32_t color) {
   reward_mls += reward_value;
   reward_number++;
   sched_disp_update = true;
+}
+
+void replace_serial_reward(float reward_value, uint32_t color) {
+  if (serial_watering) {
+    reconcile_running_serial_reward();
+  }
+  start_serial_reward(reward_value, color);
+}
+
+void append_serial_reward(float reward_value) {
+  // Extend the existing run. Keep water_start_time unchanged so elapsed time tracks the entire continuous run.
+  serial_vol += reward_value;
+  uint32_t extra_ms = (uint32_t)(reward_value / flow_rate * 1000.0);
+  pump_stop_time += extra_ms;
+  reward_mls += reward_value;
+  reward_number++;
+  sched_disp_update = true;
+}
+
+void handle_reward(float reward_value, uint32_t color) {
+  if (serial_watering) {
+    reconcile_running_serial_reward();
+  }
+  start_serial_reward(reward_value, color);
 }
 
 void handle_calibration(int n, int on, int off) {
@@ -462,6 +511,8 @@ void check_serial_commands() {
         float new_target_rps = setParams["target_rps"].as<float>();
         if (new_target_rps > 0 && new_target_rps <= MAX_RPS) {
           target_rps = new_target_rps;
+          // Persist motor speed setting across reboots.
+          preferences.putFloat("target_rps", target_rps);
           target_hz = min(static_cast<int>(target_rps * PULSES_PER_STEP * STEPS_PER_REV), MAX_PWM_FREQ_MOTOR);
           
           ledcDetach(STEP_PIN);  // Detach the current configuration
@@ -496,6 +547,23 @@ void check_serial_commands() {
         } else {
           success = false;
           responseDoc["error"] = "Invalid direction value (use left or right)";
+        }
+      }
+
+      if (setParams.containsKey("reward_overlap_policy")) {
+        const char* polValue = setParams["reward_overlap_policy"];
+        if (polValue != nullptr) {
+          RewardOverlapPolicy new_policy;
+          if (parse_reward_overlap_policy(String(polValue), new_policy)) {
+            reward_overlap_policy = new_policy;
+            preferences.putInt("reward_overlap_policy", static_cast<int>(reward_overlap_policy));
+          } else {
+            success = false;
+            responseDoc["error"] = "Invalid reward_overlap_policy (use replace, append, or reject)";
+          }
+        } else {
+          success = false;
+          responseDoc["error"] = "Invalid reward_overlap_policy (use replace, append, or reject)";
         }
       }
 
@@ -536,7 +604,38 @@ void check_serial_commands() {
           validCommand = true;
           float reward_value = doParams["reward"].as<float>();
           if (reward_value > 0) {
-            handle_reward(reward_value, pixels.Color(255, 255, 255));
+            // Reject reward if pump is busy in a mode we don't want to interrupt.
+            if (purging) {
+              success = false;
+              responseDoc["error"] = "Busy: purge in progress (reward rejected)";
+            } else if (manual_watering) {
+              success = false;
+              responseDoc["error"] = "Busy: manual watering in progress (reward rejected)";
+            } else if (calibration_in_progress) {
+              success = false;
+              responseDoc["error"] = "Busy: calibration in progress (reward rejected)";
+            } else if (serial_watering) {
+              // Serial reward overlap handling
+              if (reward_overlap_policy == ROP_REJECT) {
+                success = false;
+                responseDoc["error"] = "Ignored: reward already in progress (policy=reject)";
+              } else if (reward_overlap_policy == ROP_APPEND) {
+                // If we've already passed the stop time but haven't processed it yet, treat as idle.
+                if ((int32_t)(pump_stop_time - millis()) <= 0) {
+                  serial_watering = false;
+                  stop_pump();
+                  start_serial_reward(reward_value, pixels.Color(255, 255, 255));
+                } else {
+                  append_serial_reward(reward_value);
+                }
+              } else {
+                // Default: replace
+                replace_serial_reward(reward_value, pixels.Color(255, 255, 255));
+              }
+            } else {
+              // Normal, idle case
+              start_serial_reward(reward_value, pixels.Color(255, 255, 255));
+            }
           } else {
             success = false;
             responseDoc["error"] = "Invalid reward value";
@@ -594,6 +693,7 @@ void check_serial_commands() {
         else if (param == "reward_mls") responseDoc["reward_mls"] = reward_mls;
         else if (param == "reward_number") responseDoc["reward_number"] = reward_number;
         else if (param == "direction") responseDoc["direction"] = direction_to_string(current_direction);
+        else if (param == "reward_overlap_policy") responseDoc["reward_overlap_policy"] = reward_overlap_policy_to_string(reward_overlap_policy);
         else if (param == "juice_level") responseDoc["juice_level"] = juice_level;
         else responseDoc[param] = "Unknown parameter";
       }
@@ -643,6 +743,7 @@ void setup() {
   int stored_direction = preferences.getInt("direction", static_cast<int>(DEFAULT_DIRECTION));
   current_direction = (stored_direction == static_cast<int>(DIR_RIGHT)) ? DIR_RIGHT : DIR_LEFT;
   calibration_direction = current_direction;
+  reward_overlap_policy = static_cast<RewardOverlapPolicy>(preferences.getInt("reward_overlap_policy", static_cast<int>(ROP_REPLACE)));
 
   // Setup backlight and power
   pinMode(TFT_BACKLITE, OUTPUT);

@@ -1,6 +1,6 @@
-# Assembly guide (Juicer)
+# Juicer kit assembly guide
 
-![Assembled juicer](images/assembled.png)
+<img src="images/assembled.png" alt="Assembled juicer" width="40%">
 
 This is a first-draft assembly flow based on the photo set. If anything in your kit differs (pump model, fittings, mounting hardware, board revision), we can tweak the steps.
 
@@ -9,13 +9,13 @@ This is a first-draft assembly flow based on the photo set. If anything in your 
 
 ## Step 1 — Confirm the kit contents
 
-![Juicer kit contents](images/juicer_kit.png)
+<img src="images/juicer_kit.png" alt="Juicer kit contents" width="50%">
 
 - **Identify**: pump assembly, smart bottle holder, bottle, 24V power supply, USB cable, TRRS cable, tubing, mounting bracket, screws, screwdriver.
 
 ## Step 2 — Choose a mounting option and mechanically install
 
-![Mounting options](images/mounting_options.png)
+<img src="images/mounting_options.png" alt="Mounting options" width="40%">
 
 - **Pick an orientation**:
   - The bracket is designed with flexibility in mind, allowing mounting in several orientations.
@@ -31,7 +31,7 @@ This is a first-draft assembly flow based on the photo set. If anything in your 
 
 ## Step 3 — Wiring
 
-![Wiring](images/wiring.png)
+<img src="images/wiring.png" alt="Wiring" width="50%">
 
 - Plug the **24 VDC power supply** into the pump assembly and wall power, using the routing holes in the mounting bracket to manage wires and reduce inadvertent removal.
 - Plug the **TRRS cable** into both the pump assembly and smart bottle holder.
@@ -49,8 +49,10 @@ This is a first-draft assembly flow based on the photo set. If anything in your 
 
 - **Route first, cut last**: plan tubing runs so there are no tight bends or pinch points.
 - **Attach tubing**:
+  - Ensure the clamp tab (labeled in image) is lifted to its highest position.
   - Insert one end of tubing fully into bottle.
   - Route tubing into pump as shown in image, ensuring it runs over the rollers inside the channel and through the spring-loaded U-channels on the entry and exit.
+  - Lower the clamp tab.
   - By default, the pump will move liquid from right to left. This can be changed in the settings:
 
     `{"set":{"direction":"right"}}` (to pump from left -> right)
@@ -71,7 +73,9 @@ This is a first-draft assembly flow based on the photo set. If anything in your 
 
 ## Step 7 — Calibration
 - The unit comes calibrated as part of testing, but different lengths of tubing and juice tube configurations will alter that flow rate.
+- Tip: if you see **bubbles** coming from the end of the tube in the bottle while pumping, the pump direction is reversed. Flip direction with `{"set":{"direction":"left"}}` or `{"set":{"direction":"right"}}` (choose the direction that moves liquid from the bottle toward the subject).
 - The recommended method of calibration:
+  - Pour at least 200 mL of water or juice into the supplied Nalgene bottle.
   - Use the "Purge" button (middle button right of screen) to administer 100 mL of juice into a vessel.
   - Use a precise scale (tared for that vessel) to measure the weight in grams of fluid dispensed, which should be approximately equal to the mL dispensed.
   - Update the flow rate using:

@@ -315,7 +315,17 @@ class JuicerTestBase(unittest.TestCase):
         if _GLOBAL_SAVED_SETTINGS is None:
             # Snapshot current persisted settings so we can restore at process exit.
             _GLOBAL_SAVED_SETTINGS = cls.client.request(
-                {"get": ["flow_rate", "purge_vol", "target_rps", "direction", "reward_mls", "reward_number"]}
+                {
+                    "get": [
+                        "flow_rate",
+                        "purge_vol",
+                        "target_rps",
+                        "direction",
+                        "reward_overlap_policy",
+                        "reward_mls",
+                        "reward_number",
+                    ]
+                }
             )
             cls._saved_settings = _GLOBAL_SAVED_SETTINGS
             # Print persisted settings up-front for operator confidence/debugging.
@@ -324,7 +334,8 @@ class JuicerTestBase(unittest.TestCase):
                 f"flow_rate={cls._saved_settings.get('flow_rate')}, "
                 f"purge_vol={cls._saved_settings.get('purge_vol')}, "
                 f"target_rps={cls._saved_settings.get('target_rps')}, "
-                f"direction={cls._saved_settings.get('direction')}",
+                f"direction={cls._saved_settings.get('direction')}, "
+                f"reward_overlap_policy={cls._saved_settings.get('reward_overlap_policy')}",
                 file=sys.stderr,
             )
 
@@ -361,7 +372,7 @@ def _global_cleanup() -> None:
     try:
         if _GLOBAL_SAVED_SETTINGS:
             restore: dict[str, Any] = {}
-            for k in ("flow_rate", "purge_vol", "target_rps", "direction"):
+            for k in ("flow_rate", "purge_vol", "target_rps", "direction", "reward_overlap_policy"):
                 if k in _GLOBAL_SAVED_SETTINGS:
                     restore[k] = _GLOBAL_SAVED_SETTINGS[k]
             if restore:
@@ -401,6 +412,7 @@ class TestProtocolBasics(JuicerTestBase):
             "reward_mls",
             "reward_number",
             "direction",
+            "reward_overlap_policy",
             "juice_level",
         ]
         resp = self.client.request({"get": keys})
@@ -426,6 +438,8 @@ class TestProtocolBasics(JuicerTestBase):
         self.assertGreaterEqual(int(resp["reward_number"]), 0)
 
         self.assertIn(resp["direction"], ("left", "right"))
+
+        self.assertIn(resp["reward_overlap_policy"], ("replace", "append", "reject"))
 
         # Firmware currently returns ">50mLs" or "<50mLs", but keep this loose to avoid false negatives.
         self.assertIsInstance(resp["juice_level"], str)
@@ -520,6 +534,16 @@ class TestSetValidation(JuicerTestBase):
         self.assertStatusSuccess(resp)
         got = self.client.get("target_rps")
         self.assertAlmostEqual(float(got["target_rps"]), 1.0, places=3)
+
+    def test_set_reward_overlap_policy_accepts_and_round_trips(self) -> None:
+        for val in ("replace", "append", "reject"):
+            resp = self.client.set(reward_overlap_policy=val)
+            self.assertStatusSuccess(resp)
+            got = self.client.get("reward_overlap_policy")
+            self.assertEqual(got.get("reward_overlap_policy"), val)
+
+        resp = self.client.set(reward_overlap_policy="definitely_not_valid")
+        self.assertStatusFailure(resp)
 
     def test_set_direction_accepts_left_right(self) -> None:
         resp = self.client.set(direction="right")

@@ -67,6 +67,10 @@ Send JSON objects with any combination of `set`, `do`, and `get` fields. Only on
 - `{"set": {"purge_vol": <float>}}` — set purge volume (must be > 0).
 - `{"set": {"target_rps": <float>}}` — set the pump motor **step rate** as a target revolutions-per-second (must be > 0 and <= MAX_RPS). This is the parameter that most directly corresponds to “how fast the pump runs”.
 - `{"set": {"direction": "<left|right>"}}` — persist pump direction for future runs.
+- `{"set": {"reward_overlap_policy": "<replace|append|reject>"}}` — persist what to do if `do.reward` arrives while a **serial reward** is already running:
+  - `replace`: stop/shorten the previous reward and start the requested reward (historical behavior)
+  - `append`: add the requested reward onto the end of the current running reward
+  - `reject`: reject the new reward while one is already running
 
 #### Notes on `flow_rate`
 
@@ -81,7 +85,7 @@ Send JSON objects with any combination of `set`, `do`, and `get` fields. Only on
 - **Default**: `3.0` RPS if no value has been stored previously.
 - **Range**: the firmware enforces `0 < target_rps <= 8` (`MAX_RPS`). The source code notes that practical max is often **~3–4 RPS** depending on the pump/load.
 - Changing `target_rps` will generally change the real dispense rate, so you should **re-calibrate `flow_rate`** (prefer `set.adjust_flow_rate`) after changing `target_rps`.
-- **Persistence note**: in the current firmware, `set.target_rps` takes effect immediately but is **not persisted to flash** (it will revert to the stored/default value on reboot).
+- **Persistence note**: `set.target_rps` takes effect immediately and is **persisted to flash** (it will survive reboot).
 - **Motor driver current limit (hardware)**: if you push to higher RPS, you may also need to increase the motor driver’s current limit using the small trim screw/potentiometer on the driver board. Do this at your own risk: higher current means **more heat** (driver + motor). Make **very small turns**—tiny adjustments can make a big difference—and set the current **only as high as needed** to reliably turn the peristaltic pump without skipping/stalling.
 
 ### Do commands (only one per request)
@@ -89,6 +93,8 @@ Send JSON objects with any combination of `set`, `do`, and `get` fields. Only on
 - `{"do": "abort"}` — stop pump, update reward metrics.
 - `{"do": "reset"}` — reset reward counters (number and mLs).
 - `{"do": {"reward": <float>}}` — dispense a reward (must be > 0).
+  - If a serial reward is already running, behavior depends on `reward_overlap_policy`.
+  - If **purge/manual/calibration** is in progress, reward is rejected with `status:"failure"` and an explanatory `error`.
 - `{"do": {"purge": <float>}}` — purge for given volume (must be > 0).
 - `{"do": {"calibration": {"n": <int>, "on": <int>, "off": <int>}}}` — run calibration cycles; all parameters must be > 0.
 
@@ -103,6 +109,7 @@ Request fields in a `get` array; the response includes those keys:
 - `{"get": ["reward_number"]}` → `{"reward_number": <int>}`
 - `{"get": ["direction"]}` → `{"direction": "left"|"right"}`
 - `{"get": ["juice_level"]}` → `{"juice_level": ">50mLs"|"<50mLs"}`
+- `{"get": ["reward_overlap_policy"]}` → `{"reward_overlap_policy": "replace"|"append"|"reject"}`
 - Unknown keys (e.g., `{"get": ["foo"]}`) return `{"foo": "Unknown parameter"}`
 
 ### Combined example

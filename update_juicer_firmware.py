@@ -34,7 +34,7 @@ from typing import Any, Iterable
 ESP32_INDEX_URL = "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
 
 
-DEFAULT_REPO_URL = "https://github.com/ryanmillerwork/juicer.git"
+DEFAULT_REPO_URL = "https://github.com/ngage-systems/juicer.git"
 DEFAULT_REPO_DIR = os.path.expanduser("~/code/juicer")
 
 DEFAULT_ARDUINO_CLI = os.path.expanduser("~/.local/bin/arduino-cli")
