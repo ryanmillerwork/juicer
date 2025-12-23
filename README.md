@@ -5,9 +5,11 @@ Precise USB-controlled fluid reward dispenser for behavioral experiments. Built 
 - **API**: See `api.md` for full command reference (`set` / `do` / `get`).
 - **Quick test**: `test_connection.py` auto-detects the device and queries `flow_rate`.
 - **Typical use**: Send JSON commands like `{"do":{"reward":0.5}}` or `{"get":["flow_rate"]}` over the serial port.
+- **Python helper**: `juicer.py` provides a small, researcher-friendly wrapper with port auto-discovery and convenient methods.
 
 ## Files of interest
 - `api.md` — serial API reference and CLI examples (Linux one-liners).
+- `juicer.py` — importable Python helper for experiment scripts (port auto-discovery, convenience methods, raises on device failures by default).
 - `test_connection.py` — cross-platform port discovery + `flow_rate` sanity check.
 - `unit_test.py` — integration-style protocol/state tests over serial (some tests actuate the pump briefly).
 - `update_juicer_firmware.py` — Debian-focused interactive toolchain setup + compile + firmware upload helper.
@@ -28,6 +30,41 @@ Then run either:
 ```bash
 juicer-test-connection
 juicer-unit-test
+```
+
+## Python helper usage (`juicer.py`)
+
+```python
+from juicer import Juicer
+
+with Juicer() as j:
+    j.set(target_rps=2.5)
+    j.set(reward_overlap_policy="append")
+    resp = j.reward(0.5, "reward_mls", "reward_number", "juice_level")
+    print(resp)
+```
+
+### Notes
+- **Port selection**: `Juicer()` auto-detects the device. To force a specific port:
+
+```python
+from juicer import Juicer
+
+j = Juicer(port="/dev/ttyACM0")  # or "COM15" on Windows
+j.close()
+```
+
+- **Error handling**: the helper **raises** if the device replies with `{"status":"failure", ...}` (or other non-success status).
+  - If you want to handle failures yourself, construct with `raise_on_failure=False` and check the returned dict.
+
+- **Keeping a connection open** (recommended for long experiments): create one `Juicer()` and reuse it, then call `close()` at shutdown. e.g.,
+
+```python
+from juicer import Juicer
+
+j = Juicer()
+j.reward(0.5, "reward_mls", "reward_number", "juice_level")
+j.close()
 ```
 
 ## Firmware compile + upload (Debian, interactive)

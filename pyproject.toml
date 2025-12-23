@@ -17,7 +17,7 @@ juicer-test-connection = "test_connection:main"
 juicer-unit-test = "unit_test:_main"
 
 [tool.setuptools]
-# Keep this intentionally minimal: only the serial-test scripts are installable/importable.
+# Keep this intentionally minimal: only the helper + serial-test scripts are installable/importable.
 py-modules = ["test_connection", "unit_test", "juicer"]
 
 
