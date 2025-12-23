@@ -17,8 +17,18 @@ from juicer import Juicer
 with Juicer() as j:
     j.set(target_rps=2.5)
     j.set(reward_overlap_policy="append")
-    j.reward(0.5)  # mL
-    print(j.get("reward_number", "reward_mls"))
+    resp = j.reward(0.5, "reward_mls", "reward_number", "juice_level")
+    print(resp)
+```
+
+Alternative (keep a connection open; remember to close):
+
+```python
+from juicer import Juicer
+
+j = Juicer()
+j.reward(0.5, "reward_mls", "reward_number", "juice_level")
+j.close()
 ```
 """
 
@@ -246,17 +256,23 @@ class Juicer:
         return self.request(payload, timeout_s=timeout_s)
 
     # Convenience methods
-    def reward(self, mls: float, *, timeout_s: float | None = None) -> dict[str, Any]:
-        return self.do({"reward": float(mls)}, timeout_s=timeout_s)
+    def reward(self, mls: float, *get_keys: str, timeout_s: float | None = None) -> dict[str, Any]:
+        """
+        Dispense `mls` and optionally fetch additional keys in the same request.
 
-    def purge(self, mls: float, *, timeout_s: float | None = None) -> dict[str, Any]:
-        return self.do({"purge": float(mls)}, timeout_s=timeout_s)
+        Example:
+            j.reward(0.5, "reward_mls", "reward_number", "juice_level")
+        """
+        return self.do({"reward": float(mls)}, get=get_keys or None, timeout_s=timeout_s)
 
-    def abort(self, *, timeout_s: float | None = None) -> dict[str, Any]:
-        return self.do("abort", timeout_s=timeout_s)
+    def purge(self, mls: float, *get_keys: str, timeout_s: float | None = None) -> dict[str, Any]:
+        return self.do({"purge": float(mls)}, get=get_keys or None, timeout_s=timeout_s)
 
-    def reset_counters(self, *, timeout_s: float | None = None) -> dict[str, Any]:
-        return self.do("reset", timeout_s=timeout_s)
+    def abort(self, *get_keys: str, timeout_s: float | None = None) -> dict[str, Any]:
+        return self.do("abort", get=get_keys or None, timeout_s=timeout_s)
+
+    def reset_counters(self, *get_keys: str, timeout_s: float | None = None) -> dict[str, Any]:
+        return self.do("reset", get=get_keys or None, timeout_s=timeout_s)
 
     def adjust_flow_rate(self, *, expected_mls: float, actual_mls: float, timeout_s: float | None = None) -> dict[str, Any]:
         return self.request(
