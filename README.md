@@ -3,6 +3,7 @@
 Precise USB-controlled fluid reward dispenser for behavioral experiments. Built around an ESP32 microcontroller driving a Boxer 9QX pump. The device is commanded with newline-terminated JSON over a 2,000,000 baud serial link.
 
 - **API**: See `api.md` for full command reference (`set` / `do` / `get`).
+- **Assembly**: See `docs/assembly/README.md` for hardware assembly + wiring (with photos).
 - **Quick test**: `test_connection.py` auto-detects the device and queries `flow_rate`.
 - **Typical use**: Send JSON commands like `{"do":{"reward":0.5}}` or `{"get":["flow_rate"]}` over the serial port.
 - **Python helper**: `juicer.py` provides a small, researcher-friendly wrapper with port auto-discovery and convenient methods.
@@ -19,10 +20,20 @@ Precise USB-controlled fluid reward dispenser for behavioral experiments. Built 
 ## Python setup (recommended)
 These scripts require **Python 3.10+** and **pyserial**.
 
-From the repo root:
+### Python environment note (beginners)
+If your system Python won’t let you install packages globally (common on Debian/Ubuntu with “externally managed environment” errors), use a virtual environment:
 
 ```bash
-python3 -m pip install -e .
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e .
+```
+
+If you already manage your own environment (conda/venv/etc), just run from the repo root:
+
+```bash
+python -m pip install -e .
 ```
 
 Then run either:
@@ -85,11 +96,6 @@ Notes:
 ## Notes
 - Device enumerates as a USB serial port (e.g., `/dev/ttyACM0` on Linux, `COMx` on Windows).
 - Responses are JSON per request; see `api.md` for expected shapes.
-
-
-
-
-
-
-
+- For juicers with the TTL BNC jack, the input buffer treats 1.9–12 VDC as logic "high".
+- Commands must be newline-terminated. If the newline is omitted, the device waits until its 1-second serial timeout before responding.
 

@@ -1,6 +1,6 @@
 # Juicer Serial API
 
-The pump speaks newline-terminated JSON over its USB serial port (2,000,000 baud). Below is the command set implemented by the firmware in `juice_pump3/juice_pump3.ino`, plus a one-liner example to query the device on Linux.
+The pump speaks newline-terminated JSON over its USB serial port (2,000,000 baud). Newline termination is crucial: if you omit the newline, the device will not respond until its 1-second serial timeout expires. Below is the command set implemented by the firmware in `juice_pump3/juice_pump3.ino`, plus a one-liner example to query the device on Linux.
 
 ## Quick usage example
 
@@ -108,8 +108,10 @@ Request fields in a `get` array; the response includes those keys:
 - `{"get": ["reward_mls"]}` → `{"reward_mls": <float>}`
 - `{"get": ["reward_number"]}` → `{"reward_number": <int>}`
 - `{"get": ["direction"]}` → `{"direction": "left"|"right"}`
+- `{"get": ["pump_state"]}` → `{"pump_state": "idle"|"purge"|"manual"|"serial_reward"|"calibration"}`
 - `{"get": ["juice_level"]}` → `{"juice_level": ">50mLs"|"<50mLs"}`
 - `{"get": ["reward_overlap_policy"]}` → `{"reward_overlap_policy": "replace"|"append"|"reject"}`
+- `{"get": ["notify"]}` — valid **only** when paired with `do.reward` in the same request. The immediate response is unchanged, but a **second JSON line** is emitted when the pump stops: `{"notify":"reward_complete"}`.
 - Unknown keys (e.g., `{"get": ["foo"]}`) return `{"foo": "Unknown parameter"}`
 
 ### Combined example

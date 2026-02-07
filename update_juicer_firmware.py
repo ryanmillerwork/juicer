@@ -692,6 +692,34 @@ def pick_new_device(
         chosen_byid = juicer_links[0]
         chosen_port = after_byid.get(chosen_byid)
 
+    # Fallback: if a new by-id link appeared but doesn't contain "juicer3"
+    # (common if the USB product string wasn't patched / udev name differs),
+    # still treat it as the newly plugged device.
+    if not chosen_port and new_links:
+        candidates: list[tuple[str, str]] = []
+        for link in new_links:
+            port = after_byid.get(link) or os.path.realpath(link)
+            if port and os.path.exists(port):
+                candidates.append((link, port))
+
+        def score(link_and_port: tuple[str, str]) -> tuple[int, str, str]:
+            link, port = link_and_port
+            p = port.lower()
+            # Prefer typical CDC/serial device nodes if multiple appear at once.
+            if "/dev/ttyacm" in p:
+                tier = 0
+            elif "/dev/ttyusb" in p:
+                tier = 1
+            elif "/dev/tty" in p:
+                tier = 2
+            else:
+                tier = 3
+            return (tier, link.lower(), port.lower())
+
+        if candidates:
+            candidates.sort(key=score)
+            chosen_byid, chosen_port = candidates[0]
+
     if not chosen_port and new_ports:
         chosen_port = new_ports[0]
 

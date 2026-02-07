@@ -182,13 +182,14 @@ class Juicer:
         Read until a newline, returning the first parseable JSON object found.
         Ignores non-JSON lines (e.g. boot noise) until the deadline.
         """
-        buf = b""
-        while time.time() < deadline_s:
-            chunk = self._ser.read(self._ser.in_waiting or 1)
-            if chunk:
-                buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
+        original_timeout = self._ser.timeout
+        try:
+            while time.time() < deadline_s:
+                remaining = max(0.0, deadline_s - time.time())
+                self._ser.timeout = remaining
+                line = self._ser.readline()
+                if not line:
+                    continue
                 line_s = line.decode(errors="replace").strip()
                 if not line_s:
                     continue
@@ -200,7 +201,8 @@ class Juicer:
                     continue
                 if isinstance(obj, dict):
                     return obj
-            time.sleep(0.01)
+        finally:
+            self._ser.timeout = original_timeout
 
         raise ProtocolError("Timed out waiting for a JSON response line from device")
 

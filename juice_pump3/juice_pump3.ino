@@ -9,17 +9,6 @@
 #include <ArduinoJson.h>          // 7.2.0 by Benoit Blanchon
 
 
-
-
-// speedup recs:
-// set baud to 2000000 x
-// use Serial.flush(); after each write x
-// Serial.setTxBufferSize(128); x
-// Serial.setRxBufferSize(128);  x
-// connect to usb 3.0
-// sudo setserial /dev/ttyACM0 low_latency
-
-
 // Define constants
 const int PULSES_PER_STEP = 32;
 const int STEPS_PER_REV = 200;
@@ -53,6 +42,7 @@ bool pump_running = false;        // Keeps track of if pump is running
 uint32_t pump_stop_time = 0;      // What time to stop the pump
 bool sched_disp_update = false;   // For when you want to update the display but not quite yet
 bool serialConnected = false;
+bool notify_reward_complete_pending = false;
 
 // What to do if a serial reward arrives while a serial reward is already in progress.
 // - replace: stop/shorten current reward and start requested
@@ -92,12 +82,22 @@ Preferences preferences;
  * 1. Set Commands:
  *    - {"set": {"flow_rate": <float>}}
  *      - Sets the flow rate (must be > 0).
+ *    - {"set": {"adjust_flow_rate": {"expected_mls": <float>, "actual_mls": <float>}}}
+ *      - Adjusts the stored flow rate using a measured dispense:
+ *        - flow_rate_new = flow_rate_old * (actual_mls / expected_mls)
+ *        - Returns extra fields: flow_rate_old, flow_rate_new, scale_factor
+ *      - NOTE: You must use either set.flow_rate OR set.adjust_flow_rate (not both).
  *    - {"set": {"purge_vol": <float>}}
  *      - Sets the purge volume (must be > 0).
  *    - {"set": {"target_rps": <float>}} {"set": {"target_rps": 3}}
  *      - Sets the target revolutions per second (must be > 0 and <= MAX_RPS).
  *    - {"set": {"direction": "<left|right>"}}  {"set": {"direction": "right"}}
  *      - Persists the pump direction (default is "left", meaning pump from right to left) for all future pump actions.
+ *    - {"set": {"reward_overlap_policy": "<replace|append|reject>"}}
+ *      - Controls what happens if a reward arrives while a serial reward is already running:
+ *        - replace: preempt current and start requested (default)
+ *        - append: extend current reward by requested amount
+ *        - reject: ignore new reward while reward is running
  *
  * 2. Do Commands (only 1 allowed per request):
  *    - {"do": "abort"}
@@ -106,6 +106,8 @@ Preferences preferences;
  *      - Resets reward counters (number and mLs), same as pressing the reset hardware button.
  *    - {"do": {"reward": <float>}} {"do": {"reward": 0.8}}
  *      - Dispenses a reward of the specified amount (must be > 0).
+ *      - If pump is busy (purge/manual/calibration), reward is rejected.
+ *      - If a serial reward is running, behavior depends on reward_overlap_policy.
  *    - {"do": {"purge": <float>}}
  *      - Starts a purge operation for the specified amount (must be > 0).
  *    - {"do": {"calibration": {"n": <int>, "on": <int>, "off": <int>}}} {"do": {"calibration": {"n": 10, "on": 500, "off": 500}}}
@@ -127,6 +129,10 @@ Preferences preferences;
  *      - Retrieves the total number of rewards dispensed.
  *    - {"get": ["direction"]}
  *      - Retrieves the persisted pump direction ("left" or "right")
+ *    - {"get": ["reward_overlap_policy"]}
+ *      - Retrieves the reward overlap policy ("replace", "append", or "reject")
+ *    - {"get": ["pump_state"]}
+ *      - Retrieves a minimal pump state string: "idle", "purge", "manual", "serial_reward", or "calibration"
  *    - {"get": ["juice_level"]}
  *      - Retrieves juice level status string: "level>250", "250>level>50", "level<50", or sensor error message
  *    - {"get": ["<unknown_parameter>"]}
@@ -145,19 +151,6 @@ Preferences preferences;
 
 
 // Pin definitions for motor and switches
-
-// old
-// #define REMOTE_TOGGLE_PIN 13
-// #define DMODE0_PIN 12
-// #define DMODE1_PIN 11
-// #define DMODE2_PIN 10
-// #define DIR_PIN 9
-// #define STEP_PIN 6
-// #define EN_PIN 5
-
-// new
-// #define REMOTE_TOGGLE_PIN 13  // Replaced with juice level detection
-
 #define DMODE0_PIN 5
 #define DMODE1_PIN 6
 #define DMODE2_PIN 9
@@ -183,6 +176,16 @@ String reward_overlap_policy_to_string(RewardOverlapPolicy p) {
   if (p == ROP_APPEND) return "append";
   if (p == ROP_REJECT) return "reject";
   return "replace";
+}
+
+// A minimal, single-string representation of what the pump is currently doing.
+// Intended for the API `get: ["pump_state"]`.
+String pump_state_to_string() {
+  if (purging) return "purge";
+  if (serial_watering) return "serial_reward";
+  if (manual_watering) return "manual";
+  if (calibration_in_progress) return "calibration";
+  return "idle";
 }
 
 bool parse_reward_overlap_policy(const String& s, RewardOverlapPolicy& out) {
@@ -359,6 +362,10 @@ void check_for_pump_stop() {
     // reward_number++;
     serial_watering = false;
     stop_pump();
+    if (notify_reward_complete_pending) {
+      Serial.println("{\"notify\":\"reward_complete\"}");
+      notify_reward_complete_pending = false;
+    }
     update_display(); // Reset highlight
   }
 
@@ -439,6 +446,33 @@ void check_serial_commands() {
       } else if (!doc["do"].is<const char*>()) {
         responseDoc["status"] = "failure";
         responseDoc["error"] = "Invalid 'do' command format";
+        String response;
+        serializeJson(responseDoc, response);
+        Serial.println(response);
+        return;
+      }
+    }
+
+    bool get_notify_requested = false;
+    if (doc.containsKey("get")) {
+      JsonArray getArray = doc["get"].as<JsonArray>();
+      for (JsonVariant value : getArray) {
+        if (value.as<String>() == "notify") {
+          get_notify_requested = true;
+          break;
+        }
+      }
+    }
+
+    if (get_notify_requested) {
+      bool reward_in_do = false;
+      if (doc.containsKey("do") && doc["do"].is<JsonObject>()) {
+        JsonObject doParams = doc["do"].as<JsonObject>();
+        reward_in_do = doParams.containsKey("reward");
+      }
+      if (!reward_in_do) {
+        responseDoc["status"] = "failure";
+        responseDoc["error"] = "get.notify is only valid when paired with do.reward in the same request";
         String response;
         serializeJson(responseDoc, response);
         Serial.println(response);
@@ -586,6 +620,7 @@ void check_serial_commands() {
             serial_watering = false;
             calibration_in_progress = false;
           }
+          notify_reward_complete_pending = false;
           sched_disp_update = true;
         } else if (action == "reset") {
           reset_counters(false);
@@ -635,6 +670,9 @@ void check_serial_commands() {
             } else {
               // Normal, idle case
               start_serial_reward(reward_value, pixels.Color(255, 255, 255));
+            }
+            if (success && get_notify_requested) {
+              notify_reward_complete_pending = true;
             }
           } else {
             success = false;
@@ -694,7 +732,9 @@ void check_serial_commands() {
         else if (param == "reward_number") responseDoc["reward_number"] = reward_number;
         else if (param == "direction") responseDoc["direction"] = direction_to_string(current_direction);
         else if (param == "reward_overlap_policy") responseDoc["reward_overlap_policy"] = reward_overlap_policy_to_string(reward_overlap_policy);
+        else if (param == "pump_state") responseDoc["pump_state"] = pump_state_to_string();
         else if (param == "juice_level") responseDoc["juice_level"] = juice_level;
+        else if (param == "notify") { /* handled asynchronously */ }
         else responseDoc[param] = "Unknown parameter";
       }
     }
@@ -768,8 +808,9 @@ void setup() {
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN, OUTPUT);
   // Setup juice level sensor pin (digital input).
-  // Use pull-up so the line is HIGH by default; the sensor should pull it LOW when liquid is detected.
-  pinMode(JUICE_LEVEL_LOW_PIN, INPUT_PULLUP);
+  // No internal pull-up (some sensors can't sink enough current, resulting in ~2-3V "low").
+  // If the line floats, add an external pull-up/down appropriate for your sensor output type.
+  pinMode(JUICE_LEVEL_LOW_PIN, INPUT);
   pinMode(SWITCH_D0_PIN, INPUT_PULLUP); // D0 is pulled HIGH by default
   pinMode(SWITCH_D1_PIN, INPUT_PULLDOWN);
   pinMode(SWITCH_D2_PIN, INPUT_PULLDOWN);
