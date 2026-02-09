@@ -8,6 +8,8 @@ Key features:
 - Port auto-discovery (Windows/Linux) with explicit override
 - Context-manager friendly
 - By default, raises an exception when the device replies with status != "success"
+- Reward notifications: request `notify` with `reward` to receive a follow-up JSON line
+  (`reward_with_notify(...)` or `read(timeout_s)` after `reward(..., "notify")`)
 
 Example:
 
@@ -206,6 +208,14 @@ class Juicer:
 
         raise ProtocolError("Timed out waiting for a JSON response line from device")
 
+    def read(self, timeout_s: float | None = None) -> dict[str, Any]:
+        """
+        Read the next JSON response line within the timeout.
+        """
+        if timeout_s is None:
+            timeout_s = self.timeout_s
+        return self._readline_json(time.time() + float(timeout_s))
+
     def request(
         self,
         payload: dict[str, Any],
@@ -266,6 +276,27 @@ class Juicer:
             j.reward(0.5, "reward_mls", "reward_number", "juice_level")
         """
         return self.do({"reward": float(mls)}, get=get_keys or None, timeout_s=timeout_s)
+
+    def reward_with_notify(
+        self,
+        mls: float,
+        *get_keys: str,
+        timeout_s: float | None = None,
+        notify_timeout_s: float | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """
+        Dispense `mls` and wait for the follow-up notify line.
+
+        Returns (response, notify_response). The notify response is typically:
+        {"notify": "reward_complete"}.
+        """
+        get_list = list(get_keys)
+        if "notify" not in get_list:
+            get_list.append("notify")
+        resp = self.do({"reward": float(mls)}, get=get_list, timeout_s=timeout_s)
+        deadline_s = time.time() + float(notify_timeout_s or timeout_s or self.timeout_s)
+        notify = self._readline_json(deadline_s)
+        return resp, notify
 
     def purge(self, mls: float, *get_keys: str, timeout_s: float | None = None) -> dict[str, Any]:
         return self.do({"purge": float(mls)}, get=get_keys or None, timeout_s=timeout_s)

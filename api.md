@@ -32,6 +32,9 @@ s = serial.Serial(port, 2_000_000, timeout=2, write_timeout=2, dsrdtr=True, rtsc
 s.write(b'{"get":["flow_rate"]}\n'); s.flush()
 time.sleep(0.4)
 print(s.readline().decode().strip())
+# If you request notify with a reward, read a second line when the pump stops:
+# s.write(b'{"do":{"reward":1},"get":["reward_mls","notify"]}\n'); s.flush()
+# notify = s.readline().decode(errors="replace").strip()
 s.close()
 ```
 
