@@ -262,6 +262,20 @@ class JuicerClient:
             raise ProtocolError(f"JSON response was not an object: {raw!r}")
         return obj
 
+    def read_next_json(self, timeout_s: float | None = None) -> dict[str, Any]:
+        """
+        Read the next JSON response line from the device.
+
+        Useful for asynchronous follow-up responses such as:
+        {"notify":"reward_complete"}.
+        """
+        if timeout_s is None:
+            timeout_s = self.read_timeout_s
+        deadline = time.time() + float(timeout_s)
+        obj = self._readline_json(deadline)
+        _t(f"<< {obj}")
+        return obj
+
     def get(self, *keys: str) -> dict[str, Any]:
         return self.request({"get": list(keys)})
 
@@ -465,6 +479,31 @@ class TestProtocolBasics(JuicerTestBase):
         self.assertStatusFailure(resp)
         self.assertIn("Invalid 'do' command format", resp.get("error", ""))
 
+    def test_get_stress_1000_round_trips_are_complete(self) -> None:
+        """
+        USB/serial comms stress test:
+        issue 1000 get requests and verify each response is a complete JSON object
+        containing all requested keys.
+        """
+        keys = [
+            "flow_rate",
+            "purge_vol",
+            "target_rps",
+            "reward_mls",
+            "reward_number",
+            "direction",
+            "reward_overlap_policy",
+            "pump_state",
+            "juice_level",
+        ]
+
+        n = 1000
+        for i in range(n):
+            resp = self.client.request({"get": keys})
+            self.assertIsInstance(resp, dict, f"Iteration {i+1}/{n}: non-dict response: {resp!r}")
+            for k in keys:
+                self.assertIn(k, resp, f"Iteration {i+1}/{n}: missing key {k!r} in response: {resp}")
+
 
 class TestSetValidation(JuicerTestBase):
     def test_set_flow_rate_rejects_nonpositive(self) -> None:
@@ -626,6 +665,77 @@ class TestActuationSmallVolumes(JuicerTestBase):
 
         self.assertEqual(after_n, before_n + 1)
         self.assertGreater(after_ml, before_ml)
+
+    def test_reward_notify_two_responses_with_expected_timing(self) -> None:
+        """
+        Request notify with a 0.2 mL reward and validate:
+        1) Immediate command response is received.
+        2) A second notify response is received.
+        3) Notify timing matches expected pump duration (~volume / flow_rate).
+        """
+        flow = self.client.get("flow_rate")
+        self.assertIn("flow_rate", flow)
+        flow_rate = float(flow["flow_rate"])
+        self.assertGreater(flow_rate, 0.0)
+
+        reward_ml = 0.2
+        expected_run_s = reward_ml / flow_rate
+
+        t0 = time.monotonic()
+        first = self.client.request(
+            {"do": {"reward": reward_ml}, "get": ["notify", "reward_mls", "reward_number"]},
+            timeout_s=max(self.client.read_timeout_s, 3.0),
+        )
+        t1 = time.monotonic()
+        self.assertStatusSuccess(first)
+
+        second = self.client.read_next_json(timeout_s=max(3.0, expected_run_s + 2.0))
+        t2 = time.monotonic()
+
+        self.assertIn("notify", second)
+        self.assertEqual(second.get("notify"), "reward_complete")
+
+        first_latency_s = t1 - t0
+        notify_delay_s = t2 - t1
+        total_s = t2 - t0
+
+        # Immediate response should be quick relative to pump completion.
+        self.assertLess(
+            first_latency_s,
+            max(0.8, expected_run_s * 0.75),
+            (
+                "Initial response was unexpectedly slow: "
+                f"first_latency_s={first_latency_s:.3f}, expected_run_s={expected_run_s:.3f}"
+            ),
+        )
+
+        # Notify should arrive near expected pump runtime with generous serial/firmware jitter margin.
+        lower = max(0.05, expected_run_s - 0.35)
+        upper = expected_run_s + 1.0
+        self.assertGreaterEqual(
+            notify_delay_s,
+            lower,
+            (
+                "Notify arrived too early: "
+                f"notify_delay_s={notify_delay_s:.3f}, expected_run_s={expected_run_s:.3f}, "
+                f"window=[{lower:.3f}, {upper:.3f}]"
+            ),
+        )
+        self.assertLessEqual(
+            notify_delay_s,
+            upper,
+            (
+                "Notify arrived too late: "
+                f"notify_delay_s={notify_delay_s:.3f}, expected_run_s={expected_run_s:.3f}, "
+                f"window=[{lower:.3f}, {upper:.3f}]"
+            ),
+        )
+
+        _t(
+            "notify timing: "
+            f"reward_ml={reward_ml}, flow_rate={flow_rate:.6f}, expected_run_s={expected_run_s:.3f}, "
+            f"first_latency_s={first_latency_s:.3f}, notify_delay_s={notify_delay_s:.3f}, total_s={total_s:.3f}"
+        )
 
     def test_purge_success_and_abort(self) -> None:
         # Start a tiny purge then abort quickly to ensure abort path is healthy.

@@ -979,7 +979,10 @@ def main() -> None:
     upload_build(args.arduino_cli, fqbn, port, build_dir, tmpdir=tmpdir)
 
     print("\nDone.")
-    print('Tip: verify detection with `ls -l /dev/serial/by-id/*juicer3*` and/or run `python3 test_connection.py`.')
+    print(
+        "Tip: verify detection with `ls -l /dev/serial/by-id/*juicer3*`, "
+        "then run `python3 test_connection.py` and `python3 unit_test.py`."
+    )
 
 
 if __name__ == "__main__":
