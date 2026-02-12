@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+from contextlib import contextmanager
 import glob
 import json
 import os
@@ -72,11 +73,24 @@ DEFAULT_OPEN_SETTLE_S = 0.10  # match `capactive_calibration.py`'s "Give device 
 
 # Always trace: user requested that `python unit_test.py` prints everything without flags.
 TRACE = True
+_TRACE_SUPPRESS_DEPTH = 0
 
 
 def _t(msg: str) -> None:
     """Trace log (stderr)."""
-    print(f"[unit_test][trace] {msg}", file=sys.stderr)
+    if TRACE and _TRACE_SUPPRESS_DEPTH <= 0:
+        print(f"[unit_test][trace] {msg}", file=sys.stderr)
+
+
+@contextmanager
+def _trace_suppressed():
+    """Temporarily suppress verbose trace output (used by stress tests)."""
+    global _TRACE_SUPPRESS_DEPTH
+    _TRACE_SUPPRESS_DEPTH += 1
+    try:
+        yield
+    finally:
+        _TRACE_SUPPRESS_DEPTH = max(0, _TRACE_SUPPRESS_DEPTH - 1)
 
 
 def _sleep(seconds: float, reason: str) -> None:
@@ -498,11 +512,16 @@ class TestProtocolBasics(JuicerTestBase):
         ]
 
         n = 1000
-        for i in range(n):
-            resp = self.client.request({"get": keys})
-            self.assertIsInstance(resp, dict, f"Iteration {i+1}/{n}: non-dict response: {resp!r}")
-            for k in keys:
-                self.assertIn(k, resp, f"Iteration {i+1}/{n}: missing key {k!r} in response: {resp}")
+        print(f"[unit_test] Stress test: running {n} get round-trips...", file=sys.stderr)
+        with _trace_suppressed():
+            for i in range(n):
+                resp = self.client.request({"get": keys})
+                self.assertIsInstance(resp, dict, f"Iteration {i+1}/{n}: non-dict response: {resp!r}")
+                for k in keys:
+                    self.assertIn(k, resp, f"Iteration {i+1}/{n}: missing key {k!r} in response: {resp}")
+                if (i + 1) % 100 == 0:
+                    print(f"[unit_test] Stress progress: {i + 1}/{n}", file=sys.stderr)
+        print("[unit_test] Stress test complete.", file=sys.stderr)
 
 
 class TestSetValidation(JuicerTestBase):
