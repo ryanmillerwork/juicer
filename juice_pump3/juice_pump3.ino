@@ -25,7 +25,7 @@ int reward_number = 0;            // Number of rewards since being reset
 float reward_mls = 0.0;           // Volume of rewards since being reset 
 bool purging = false;             // Goes true while purging
 bool manual_watering = false;     // Goes true while pressing water button
-bool remote_watering = false;     // Goes true while digital line is high
+bool ttl_watering = false;        // Goes true while TTL input line is high
 bool serial_watering = false;     // Goes true while watering requested by serial port
 bool calibration_in_progress = false;
 int calibration_n = 0;
@@ -37,7 +37,8 @@ float serial_vol = 0.0;           // Keep track of this in case it needs to be s
 float target_rps;                 // Target rotations per second of the pump head. max is around 3-4
 int target_hz;                    // Frequency of pulses to achieve desired target_rps
 bool reset_pressed = false;       // Keeps track of button press to only execute on button down
-unsigned long water_start_time = 0; // Keeps track of when you first press manual start or remote start so we can track amount given
+unsigned long water_start_time = 0; // Keeps track of when you first press manual start so we can track amount given
+unsigned long ttl_start_time = 0;   // Keeps track of when TTL watering starts so dispensed volume can be calculated on stop
 bool pump_running = false;        // Keeps track of if pump is running
 uint32_t pump_stop_time = 0;      // What time to stop the pump
 bool sched_disp_update = false;   // For when you want to update the display but not quite yet
@@ -132,9 +133,9 @@ Preferences preferences;
  *    - {"get": ["reward_overlap_policy"]}
  *      - Retrieves the reward overlap policy ("replace", "append", or "reject")
  *    - {"get": ["pump_state"]}
- *      - Retrieves a minimal pump state string: "idle", "purge", "manual", "serial_reward", or "calibration"
+ *      - Retrieves a minimal pump state string: "idle", "purge", "manual", "serial_reward", "ttl", or "calibration"
  *    - {"get": ["juice_level"]}
- *      - Retrieves juice level status string: "level>250", "250>level>50", "level<50", or sensor error message
+ *      - Retrieves juice level status string: ">50mLs" or "<50mLs" from the single low-level sensor on GPIO4
  *    - {"get": ["<unknown_parameter>"]}
  *      - Returns "Unknown parameter" for any unrecognized parameter.
  *
@@ -161,6 +162,7 @@ Preferences preferences;
 #define SWITCH_D0_PIN 0  // D0 is also used as the BOOT button, pulled HIGH by default
 #define SWITCH_D1_PIN 1
 #define SWITCH_D2_PIN 2
+#define TTL_WATER_PIN 13
 
 
 enum PumpDirection { DIR_LEFT, DIR_RIGHT };
@@ -183,6 +185,7 @@ String reward_overlap_policy_to_string(RewardOverlapPolicy p) {
 String pump_state_to_string() {
   if (purging) return "purge";
   if (serial_watering) return "serial_reward";
+  if (ttl_watering) return "ttl";
   if (manual_watering) return "manual";
   if (calibration_in_progress) return "calibration";
   return "idle";
@@ -212,7 +215,7 @@ void update_display(bool highlight_flow = false, bool highlight_purge = false) {
   tft.fillScreen(ST77XX_BLACK);
 
   if (purging) tft.fillRect(0, 29, 240, 24, 0x0020a8);  // Background rectangle
-  if (manual_watering || serial_watering) tft.fillRect(0, 5, 240, 24, 0x0020a8); // Background rectangle
+  if (manual_watering || serial_watering || ttl_watering) tft.fillRect(0, 5, 240, 24, 0x0020a8); // Background rectangle
 
   writeTextToScreen(10, 20, ST77XX_WHITE, "Flow rate: " + String(flow_rate) + " mL/s");
   writeTextToScreen(10, 44, ST77XX_WHITE, "Purge Vol: " + String(purge_vol) + " mL");
@@ -332,7 +335,7 @@ void check_buttons() {
   }
 
   // Purge button (S1)
-  if (digitalRead(SWITCH_D1_PIN) == HIGH && !purging && !manual_watering) {
+  if (digitalRead(SWITCH_D1_PIN) == HIGH && !purging && !manual_watering && !ttl_watering) {
     purging = true;
     pump_stop_time = millis() + purge_vol / flow_rate * 1000;
     start_pump(pixels.Color(255, 255, 0));
@@ -340,14 +343,33 @@ void check_buttons() {
   }
 
   // Manual water button (S2)
-  if (digitalRead(SWITCH_D2_PIN) == HIGH && !purging && !manual_watering) {
+  if (digitalRead(SWITCH_D2_PIN) == HIGH && !purging && !manual_watering && !ttl_watering) {
     manual_watering = true;
     water_start_time = millis();
     start_pump(pixels.Color(255, 0, 255));
     update_display(true, false); // Highlight flow rate line
   }
 
-  // Remote water toggle functionality removed - pin 13 now used for juice level detection
+}
+
+void check_ttl_watering() {
+  bool ttl_high = (digitalRead(TTL_WATER_PIN) == HIGH);
+
+  if (ttl_high && !ttl_watering) {
+    // Only start TTL watering if nothing else owns the pump.
+    if (!purging && !manual_watering && !serial_watering && !calibration_in_progress) {
+      ttl_watering = true;
+      ttl_start_time = millis();
+      reward_number++;
+      start_pump(pixels.Color(255, 255, 255));
+      update_display(true, false); // Same top-line highlight behavior as serial/manual activity
+    }
+  } else if (!ttl_high && ttl_watering) {
+    reward_mls += ((millis() - ttl_start_time) / 1000.0) * flow_rate;
+    ttl_watering = false;
+    stop_pump();
+    update_display(); // Reset highlight
+  }
 }
 
 void check_for_pump_stop() {
@@ -376,8 +398,6 @@ void check_for_pump_stop() {
     stop_pump();
     update_display(); // Reset highlight
   }
-
-  // Remote watering functionality removed - pin 13 now used for juice level detection
 
   if (calibration_in_progress) {
     if (calibration_count < calibration_n) {
@@ -613,11 +633,20 @@ void check_serial_commands() {
         String action = doc["do"].as<String>();
         if (action == "abort") {
           stop_pump();
-          if (serial_watering || calibration_in_progress) {
-            if (serial_watering) reward_mls -= serial_vol; 
-            if (calibration_in_progress) reward_mls -= calibration_on / 1000.0 * flow_rate;
-            reward_mls += ((millis() - water_start_time) / 1000.0) * flow_rate;
+          if (serial_watering || ttl_watering || calibration_in_progress) {
+            if (serial_watering) {
+              reward_mls -= serial_vol;
+              reward_mls += ((millis() - water_start_time) / 1000.0) * flow_rate;
+            }
+            if (ttl_watering) {
+              reward_mls += ((millis() - ttl_start_time) / 1000.0) * flow_rate;
+            }
+            if (calibration_in_progress) {
+              reward_mls -= calibration_on / 1000.0 * flow_rate;
+              reward_mls += ((millis() - water_start_time) / 1000.0) * flow_rate;
+            }
             serial_watering = false;
+            ttl_watering = false;
             calibration_in_progress = false;
           }
           notify_reward_complete_pending = false;
@@ -646,6 +675,9 @@ void check_serial_commands() {
             } else if (manual_watering) {
               success = false;
               responseDoc["error"] = "Busy: manual watering in progress (reward rejected)";
+            } else if (ttl_watering) {
+              success = false;
+              responseDoc["error"] = "Busy: ttl watering in progress (reward rejected)";
             } else if (calibration_in_progress) {
               success = false;
               responseDoc["error"] = "Busy: calibration in progress (reward rejected)";
@@ -814,6 +846,7 @@ void setup() {
   pinMode(SWITCH_D0_PIN, INPUT_PULLUP); // D0 is pulled HIGH by default
   pinMode(SWITCH_D1_PIN, INPUT_PULLDOWN);
   pinMode(SWITCH_D2_PIN, INPUT_PULLDOWN);
+  pinMode(TTL_WATER_PIN, INPUT_PULLDOWN);
 
   digitalWrite(EN_PIN, HIGH);
   digitalWrite(DMODE0_PIN, LOW);
@@ -842,6 +875,7 @@ void loop() {
   check_serial_connection();
   check_juice_level();
   check_buttons();
+  check_ttl_watering();
   check_serial_commands();
   check_for_pump_stop();
 }
