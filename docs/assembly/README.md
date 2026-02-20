@@ -36,6 +36,7 @@ This is a first-draft assembly flow based on the photo set. If anything in your 
 - Plug the **24 VDC power supply** into the pump assembly and wall power, using the routing holes in the mounting bracket to manage wires and reduce inadvertent removal.
 - Plug the **TRRS cable** into both the pump assembly and smart bottle holder.
 - Plug the **USB cable** into the pump assembly and host computer, ensuring the USB-C connector plugs into the microcontroller inside the pump assembly.
+- If equipped with the optional **BNC TTL jack**, connect your external digital line to gate pump run directly (HIGH=on, LOW=off). The TTL input is intended for hardware-timed control from external systems, and 2.5-5.5 VDC is the safe range for a logic HIGH.
 
 ## Step 4 — Quick test
 - At this point, the pump assembly display should be on

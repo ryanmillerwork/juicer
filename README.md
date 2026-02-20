@@ -99,6 +99,7 @@ Notes:
 ## Notes
 - Device enumerates as a USB serial port (e.g., `/dev/ttyACM0` on Linux, `COMx` on Windows).
 - Responses are JSON per request; see `api.md` for expected shapes.
-- For juicers with the TTL BNC jack, the input buffer treats 1.9–12 VDC as logic "high".
+- If equipped with the optional BNC jack, a TTL input can externally gate pump run (HIGH=on, LOW=off) without sending serial reward commands.
+- For juicers with the optional TTL BNC jack, 2.5-5.5 VDC is the safe range for a logic HIGH input.
 - Commands must be newline-terminated. If the newline is omitted, the device waits until its 1-second serial timeout before responding.
 

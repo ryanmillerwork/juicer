@@ -97,7 +97,9 @@ Send JSON objects with any combination of `set`, `do`, and `get` fields. Only on
 - `{"do": "reset"}` — reset reward counters (number and mLs).
 - `{"do": {"reward": <float>}}` — dispense a reward (must be > 0).
   - If a serial reward is already running, behavior depends on `reward_overlap_policy`.
-  - If **purge/manual/calibration** is in progress, reward is rejected with `status:"failure"` and an explanatory `error`.
+  - If **purge/manual/calibration/ttl** is in progress, reward is rejected with `status:"failure"` and an explanatory `error`.
+- If equipped with the optional **BNC TTL jack**, an external TTL line can gate pump run directly (HIGH=on, LOW=off). This mode is intended for hardware-timed control; 2.5-5.5 VDC is the safe range for a logic HIGH input.
+- `reward_overlap_policy` applies only to overlapping **serial** rewards (not TTL-driven runs).
 - `{"do": {"purge": <float>}}` — purge for given volume (must be > 0).
 - `{"do": {"calibration": {"n": <int>, "on": <int>, "off": <int>}}}` — run calibration cycles; all parameters must be > 0.
 
@@ -111,7 +113,7 @@ Request fields in a `get` array; the response includes those keys:
 - `{"get": ["reward_mls"]}` → `{"reward_mls": <float>}`
 - `{"get": ["reward_number"]}` → `{"reward_number": <int>}`
 - `{"get": ["direction"]}` → `{"direction": "left"|"right"}`
-- `{"get": ["pump_state"]}` → `{"pump_state": "idle"|"purge"|"manual"|"serial_reward"|"calibration"}`
+- `{"get": ["pump_state"]}` → `{"pump_state": "idle"|"purge"|"manual"|"serial_reward"|"ttl"|"calibration"}`
 - `{"get": ["juice_level"]}` → `{"juice_level": ">50mLs"|"<50mLs"}`
 - `{"get": ["reward_overlap_policy"]}` → `{"reward_overlap_policy": "replace"|"append"|"reject"}`
 - `{"get": ["notify"]}` — valid **only** when paired with `do.reward` in the same request. The immediate response is unchanged, but a **second JSON line** is emitted when the pump stops: `{"notify":"reward_complete"}`.
