@@ -14,7 +14,7 @@ What gets tested (by class):
   - `test_get_flow_rate_round_trip`: `get` returns a numeric `flow_rate` > 0.
   - `test_get_all_api_keys_round_trip`: `get` returns all documented keys with sane types/values.
   - `test_unknown_get_key_returns_unknown_parameter`: unknown `get` keys return `"Unknown parameter"`.
-  - `test_invalid_json_reports_invalid_json_format`: malformed JSON yields `{"status":"Invalid JSON format"}`.
+  - `test_invalid_json_reports_parse_failure`: malformed JSON yields `status:"failure"` with a parser error message.
   - `test_do_multiple_ops_rejected`: firmware rejects requests with >1 `do` op in a single object.
   - `test_do_invalid_type_rejected`: non-string/non-object `do` values are rejected.
 - `TestSetValidation`
@@ -478,10 +478,12 @@ class TestProtocolBasics(JuicerTestBase):
         self.assertIn("definitely_not_a_real_key", resp)
         self.assertEqual(resp["definitely_not_a_real_key"], "Unknown parameter")
 
-    def test_invalid_json_reports_invalid_json_format(self) -> None:
+    def test_invalid_json_reports_parse_failure(self) -> None:
         resp = self.client.request('{"get":["flow_rate"]')  # missing closing brackets/brace
-        # Firmware returns this exact string in the "status" field for parse errors.
-        self.assertEqual(resp.get("status"), "Invalid JSON format")
+        # Firmware reports parser failures as status=failure with an informative error string.
+        self.assertEqual(resp.get("status"), "failure")
+        self.assertIsInstance(resp.get("error"), str)
+        self.assertGreater(len(resp.get("error", "")), 0)
 
     def test_do_multiple_ops_rejected(self) -> None:
         resp = self.client.request({"do": {"reward": 1, "purge": 1}})

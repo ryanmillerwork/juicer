@@ -255,15 +255,82 @@ def ensure_arduino_cli_config(cfg_path: str) -> None:
         return
 
     txt = cfg_file.read_text(encoding="utf-8", errors="replace")
-    if ESP32_INDEX_URL in txt:
-        return
+    lines = txt.splitlines()
+    changed = False
 
-    # Don't try to be clever editing YAML without a parser; just append a fresh
-    # section that Arduino CLI can read. If the file already has board_manager,
-    # Arduino CLI will effectively see the last one for our added URL.
-    txt += f"\nboard_manager:\n  additional_urls:\n    - {ESP32_INDEX_URL}\n"
+    def _is_top_level_key(line: str) -> bool:
+        # Top-level YAML key (no indentation), e.g. "board_manager:".
+        return bool(re.match(r"^[A-Za-z0-9_][A-Za-z0-9_-]*\s*:\s*(?:#.*)?$", line))
 
-    cfg_file.write_text(txt, encoding="utf-8")
+    def _section_end(start: int, all_lines: list[str]) -> int:
+        end = len(all_lines)
+        for i in range(start + 1, len(all_lines)):
+            if _is_top_level_key(all_lines[i]):
+                end = i
+                break
+        return end
+
+    board_starts = [i for i, line in enumerate(lines) if re.match(r"^board_manager\s*:\s*(?:#.*)?$", line)]
+
+    # Repair previously duplicated top-level board_manager keys by keeping the first section only.
+    if len(board_starts) > 1:
+        keep = [True] * len(lines)
+        for idx in range(1, len(board_starts)):
+            start = board_starts[idx]
+            end = _section_end(start, lines)
+            for j in range(start, end):
+                keep[j] = False
+        lines = [line for i, line in enumerate(lines) if keep[i]]
+        changed = True
+        board_starts = [i for i, line in enumerate(lines) if re.match(r"^board_manager\s*:\s*(?:#.*)?$", line)]
+
+    if not board_starts:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(
+            [
+                "board_manager:",
+                "  additional_urls:",
+                f"    - {ESP32_INDEX_URL}",
+            ]
+        )
+        changed = True
+    else:
+        bm_start = board_starts[0]
+        bm_end = _section_end(bm_start, lines)
+
+        # If already present in board_manager section, nothing further needed.
+        if not any(ESP32_INDEX_URL in line for line in lines[bm_start:bm_end]):
+            add_start = None
+            add_indent = "  "
+            for i in range(bm_start + 1, bm_end):
+                m = re.match(r"^(\s+)additional_urls\s*:\s*(?:#.*)?$", lines[i])
+                if m:
+                    add_start = i
+                    add_indent = m.group(1)
+                    break
+
+            if add_start is None:
+                insert_at = bm_end
+                lines[insert_at:insert_at] = [
+                    f"{add_indent}additional_urls:",
+                    f"{add_indent}  - {ESP32_INDEX_URL}",
+                ]
+            else:
+                insert_at = add_start + 1
+                while insert_at < bm_end:
+                    cur = lines[insert_at]
+                    if cur.strip() and not cur.lstrip().startswith("#"):
+                        cur_indent = len(cur) - len(cur.lstrip(" "))
+                        add_level = len(add_indent)
+                        if cur_indent <= add_level:
+                            break
+                    insert_at += 1
+                lines.insert(insert_at, f"{add_indent}  - {ESP32_INDEX_URL}")
+            changed = True
+
+    if changed:
+        cfg_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def machine_arch() -> str:

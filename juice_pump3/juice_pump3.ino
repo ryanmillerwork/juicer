@@ -438,12 +438,20 @@ void check_serial_commands() {
 
     String command = Serial.readStringUntil('\n');
     command.trim();
-    StaticJsonDocument<200> doc;
+    StaticJsonDocument<384> doc;
     StaticJsonDocument<400> responseDoc; // Response JSON object to collect status
     DeserializationError error = deserializeJson(doc, command);
     
     if (error) {
-      Serial.println("{\"status\": \"Invalid JSON format\"}");
+      responseDoc["status"] = "failure";
+      String errMsg = String(error.c_str());
+      if (error == DeserializationError::NoMemory) {
+        errMsg += " (JSON too large for buffer)";
+      }
+      responseDoc["error"] = errMsg;
+      String response;
+      serializeJson(responseDoc, response);
+      Serial.println(response);
       return;
     }
 

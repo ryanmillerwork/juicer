@@ -1,3 +1,4 @@
 # Ignore local build artifacts
 build/
 
+.claude/worktrees/
