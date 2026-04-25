@@ -818,7 +818,7 @@ void setup() {
   preferences.begin("watering", false); // open the watering namespace in read-write mode
   flow_rate = preferences.getFloat("flow_rate", 0.5);
   purge_vol = preferences.getFloat("purge_vol", 10.0);
-  target_rps = preferences.getFloat("target_rps", 3.0);
+  target_rps = preferences.getFloat("target_rps", 4.0);
   target_hz = min(static_cast<int>(target_rps * PULSES_PER_STEP * STEPS_PER_REV), MAX_PWM_FREQ_MOTOR);
   int stored_direction = preferences.getInt("direction", static_cast<int>(DEFAULT_DIRECTION));
   current_direction = (stored_direction == static_cast<int>(DIR_RIGHT)) ? DIR_RIGHT : DIR_LEFT;
